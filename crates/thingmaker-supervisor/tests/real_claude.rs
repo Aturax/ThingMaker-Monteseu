@@ -248,7 +248,7 @@ async fn a_fork_remembers_the_main_conversation_and_the_main_session_is_untouche
 }
 
 /// A command Claude Code leaves in the background is followed to its end
-/// through its output file, with nothing asked of the adapter beyond ACP.
+/// through native lifecycle events or the older output-file fallback.
 #[tokio::test]
 async fn a_real_background_command_is_seen_running_and_then_ending() {
     if std::env::var("THINGMAKER_REAL_CLAUDE").as_deref() != Ok("1") {
@@ -289,7 +289,10 @@ async fn a_real_background_command_is_seen_running_and_then_ending() {
     assert!(running.output_path.is_some(), "{running:?}");
     let ended = ended.unwrap();
     assert_eq!(ended.state, thingmaker_supervisor::supervisor::BackgroundTaskState::Completed, "{ended:?}");
-    assert_eq!(ended.exit_code, Some(0));
+    // Native lifecycle events report success without an OS exit code.
+    if !ended.native_lifecycle {
+        assert_eq!(ended.exit_code, Some(0));
+    }
     let _ = actor.stop().await;
 }
 

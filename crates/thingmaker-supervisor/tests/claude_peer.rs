@@ -766,14 +766,15 @@ async fn an_agent_that_cannot_fork_is_refused_before_a_session_exists() {
 }
 
 #[tokio::test]
-async fn a_command_left_in_the_background_is_followed_until_its_output_says_it_ended() {
+async fn a_background_command_is_followed_even_when_its_output_file_appears_late() {
     let root = tempfile::tempdir().unwrap();
     // Where Claude Code puts a task's output: its own folder under the
     // temporary directory, in the session's `tasks` folder.
     let tasks = std::env::temp_dir().join(format!("claude-peer-{}", std::process::id())).join("proj/session/tasks");
     std::fs::create_dir_all(&tasks).unwrap();
     let output = tasks.join("bmock1.output");
-    std::fs::write(&output, "building…\n").unwrap();
+    // The result may arrive before the provider has created its output file.
+    let _ = std::fs::remove_file(&output);
     let flag = format!("--background={}", output.display());
     let Some(config) = config(&[flag.as_str()], None, PermissionStance::AcceptEdits, root.path()) else { return };
     let actor = SessionActor::open(config).await.expect("attached");
@@ -826,3 +827,49 @@ async fn a_background_command_still_running_when_the_session_ends_ends_with_it()
     std::fs::remove_dir_all(tasks.parent().unwrap().parent().unwrap().parent().unwrap()).ok();
 }
 
+
+#[tokio::test]
+async fn native_background_completion_does_not_depend_on_a_windows_file() {
+    let root = tempfile::tempdir().unwrap();
+    let Some(config) = config(&["--native-background=complete"], None, PermissionStance::AcceptEdits, root.path()) else { return };
+    let actor = SessionActor::open(config).await.unwrap();
+    let mut subscription = actor.subscribe();
+    actor.submit_text("p1", "build").await.unwrap();
+    collect(&mut subscription, Duration::from_secs(5), |event| matches!(event, SessionEvent::BackgroundTask(task) if task.state == BackgroundTaskState::Completed)).await;
+    let tasks = actor.background_tasks().await.unwrap();
+    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks[0].state, BackgroundTaskState::Completed);
+    assert!(tasks[0].ended_at_unix_ms.is_some());
+    actor.stop().await.unwrap();
+}
+
+#[tokio::test]
+async fn stopping_a_native_task_preserves_the_running_parent_turn() {
+    let root = tempfile::tempdir().unwrap();
+    let Some(config) = config(&["--native-background=busy"], None, PermissionStance::AcceptEdits, root.path()) else { return };
+    let actor = SessionActor::open(config).await.unwrap();
+    let mut subscription = actor.subscribe();
+    actor.submit_text("p1", "serve").await.unwrap();
+    collect(&mut subscription, Duration::from_secs(5), |event| matches!(event, SessionEvent::BackgroundTask(task) if task.can_stop)).await;
+    let before = actor.snapshot().await.unwrap().foreground;
+    assert!(actor.stop_background("unknown".into()).await.is_err());
+    actor.stop_background("native1".into()).await.unwrap();
+    let after = actor.snapshot().await.unwrap();
+    assert_eq!(after.foreground, before);
+    assert_eq!(after.background_tasks[0].state, BackgroundTaskState::Stopped);
+    actor.stop_background("native1".into()).await.unwrap();
+    actor.stop().await.unwrap();
+}
+
+#[tokio::test]
+async fn refused_native_stop_keeps_the_task_running() {
+    let root = tempfile::tempdir().unwrap();
+    let Some(config) = config(&["--native-background=refuse"], None, PermissionStance::AcceptEdits, root.path()) else { return };
+    let actor = SessionActor::open(config).await.unwrap();
+    let mut subscription = actor.subscribe();
+    actor.submit_text("p1", "serve").await.unwrap();
+    collect(&mut subscription, Duration::from_secs(5), |event| matches!(event, SessionEvent::BackgroundTask(task) if task.can_stop)).await;
+    assert!(actor.stop_background("native1".into()).await.is_err());
+    assert_eq!(actor.background_tasks().await.unwrap()[0].state, BackgroundTaskState::Running);
+    actor.stop().await.unwrap();
+}

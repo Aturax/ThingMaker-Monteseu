@@ -1,11 +1,5 @@
-/**
- * Background tasks: a command an agent left running outlives the turn that
- * started it, and nothing in the transcript says it is still going. The
- * session bar's icon does: a green dot while one runs, a grey one when all
- * have ended, none when there have been none; and it opens a window listing
- * them, the side transcript's too, with each one's output on request.
- */
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+/** Background task status, grouped history, output and individual stop controls. */
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BackgroundTask, EventEnvelope } from "@thingmaker/contracts";
 
@@ -38,6 +32,7 @@ const task = (overrides: Partial<BackgroundTask> = {}): BackgroundTask => ({
   command: "pnpm app --restart",
   description: "Build and install the app",
   outputPath: "/private/tmp/claude-501/p/s/tasks/bapnhs6hh.output",
+  canStop: true,
   state: "running",
   startedAtUnixMs: Date.now() - 65_000,
   ...overrides,
@@ -71,24 +66,68 @@ describe("the background tasks icon", () => {
   });
 
   it("has a green dot while one runs, and lists it", () => {
-    useStore.setState({ sessions: { s1: session("s1", [task(), task({ taskId: "old", command: "pnpm test", state: "completed", exitCode: 0, startedAtUnixMs: Date.now() - 600_000, endedAtUnixMs: Date.now() - 500_000 })]) } });
+    useStore.setState({ sessions: { s1: session("s1", [task(), task({ taskId: "old", command: "pnpm test", state: "completed", exitCode: 0, startedAtUnixMs: Date.now() - 10_000, endedAtUnixMs: Date.now() - 5_000 })]) } });
     const { container } = render(<BackgroundTasksButton sessionId="s1" />);
     expect(container.querySelector(".badge-dot-running")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Background tasks: 1 running" }));
     const rows = screen.getAllByRole("listitem");
-    // Newest first.
+    expect(within(screen.getByRole("region", { name: "Running" })).getAllByRole("listitem")).toHaveLength(1);
+    expect(within(screen.getByRole("region", { name: "Finished" })).getAllByRole("listitem")).toHaveLength(1);
+    // Running group first; newest first within each group.
     expect(rows[0]!.textContent).toContain("pnpm app --restart");
     expect(rows[0]!.textContent).toMatch(/Running for 1m \d+s/);
     expect(rows[1]!.textContent).toContain("pnpm test");
     expect(rows[1]!.textContent).toContain("Finished");
   });
 
-  it("has a grey dot once all have ended, and says how one failed", () => {
+  it("has no dot once all have ended, and says how one failed", () => {
     useStore.setState({ sessions: { s1: session("s1", [task({ state: "failed", exitCode: 2, endedAtUnixMs: Date.now() })]) } });
     const { container } = render(<BackgroundTasksButton sessionId="s1" />);
-    expect(container.querySelector(".badge-dot-ended")).toBeTruthy();
+    expect(container.querySelector(".badge-dot")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Background tasks: all ended" }));
     expect(screen.getByRole("listitem").textContent).toContain("Failed (exit 2)");
+  });
+
+  it("removes the running indicator when the last task ends", () => {
+    useStore.setState({ sessions: { s1: session("s1", [task()]) } });
+    const { container } = render(<BackgroundTasksButton sessionId="s1" />);
+    expect(container.querySelector(".badge-dot-running")).toBeTruthy();
+    useStore.setState({ sessions: { s1: session("s1", [task({ state: "completed", endedAtUnixMs: Date.now() })]) } });
+    return waitFor(() => expect(container.querySelector(".badge-dot")).toBeNull());
+  });
+
+  it("stops only the selected running task and prevents duplicate requests", async () => {
+    useStore.setState({ sessions: { s1: session("s1", [task(), task({ taskId: "other", command: "other server" }), task({ taskId: "done", state: "completed" })]) } });
+    let finish!: () => void;
+    const stop = vi.spyOn(api, "sessionBackgroundStop").mockImplementation(() => new Promise<void>((resolve) => { finish = resolve; }));
+    render(<BackgroundTasksButton sessionId="s1" />);
+    fireEvent.click(screen.getByRole("button", { name: "Background tasks: 2 running" }));
+    const button = screen.getByRole("button", { name: "Stop task: pnpm app --restart" }) as HTMLButtonElement;
+    fireEvent.click(button);
+    expect(button.disabled).toBe(true);
+    expect(screen.getAllByRole("button", { name: /^Stop task:/ })).toHaveLength(2);
+    expect(stop).toHaveBeenCalledExactlyOnceWith({ id: "s1", attachmentGeneration: "1" }, "bapnhs6hh");
+    finish();
+    await waitFor(() => expect(button.disabled).toBe(false));
+  });
+
+  it("shows a failed stop without pretending the task ended", async () => {
+    useStore.setState({ sessions: { s1: session("s1", [task()]) } });
+    vi.spyOn(api, "sessionBackgroundStop").mockRejectedValue({ message: "Task could not be stopped" });
+    render(<BackgroundTasksButton sessionId="s1" />);
+    fireEvent.click(screen.getByRole("button", { name: "Background tasks: 1 running" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Stop task:/ }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toBe("Task could not be stopped"));
+    expect(screen.getByRole("region", { name: "Running" })).toBeTruthy();
+  });
+
+  it("explains unavailable controls for older providers", () => {
+    useStore.setState({ sessions: { s1: session("s1", [task({ canStop: false })]) } });
+    render(<BackgroundTasksButton sessionId="s1" />);
+    fireEvent.click(screen.getByRole("button", { name: "Background tasks: 1 running" }));
+    const button = screen.getByRole("button", { name: /^Stop task:/ }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.title).toContain("Update the Claude provider");
   });
 
   it("shows a task's output, read from the session that ran it", async () => {

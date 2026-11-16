@@ -969,6 +969,12 @@ pub struct BackgroundOutput {
     pub bytes: u64,
 }
 
+/// Stops a task belonging to this attached session, without cancelling its turn.
+#[tauri::command]
+pub async fn session_background_stop(request: BackgroundOutputRequest, state: State<'_, AppState>) -> CommandResult<()> {
+    actor_for(&state, &request.handle)?.stop_background(request.task_id).await
+}
+
 /// The output so far of a command the agent left running in the background.
 /// Only the file the task's own tool result named is read, and only when it
 /// is one of Claude Code's task output files.

@@ -1,14 +1,4 @@
-/**
- * Background tasks: commands an agent left running after its turn ended —
- * a build, a dev server, a long test run. Nothing on the transcript says
- * they are still going once the turn has settled, so the session bar keeps
- * an icon for them: a green dot while any runs, a grey one once they have
- * all ended, none when there have been none. It opens a small window with
- * each one's command, state and output.
- *
- * The session's side transcript is a session of its own; its commands are
- * listed here too, marked as its.
- */
+/** Background task status, grouped history, output and individual stop controls. */
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { BackgroundOutput, BackgroundTask } from "@thingmaker/contracts";
 import { api } from "../ipc";
@@ -102,7 +92,7 @@ export function BackgroundTasksButton({ sessionId }: { sessionId: string }) {
         type="button"
       >
         <IconBackgroundTasks size={15} />
-        {tasks.length > 0 && <span aria-hidden="true" className={`badge-dot ${running > 0 ? "badge-dot-running" : "badge-dot-ended"}`} />}
+        {running > 0 && <span aria-hidden="true" className="badge-dot badge-dot-running" />}
       </button>
       {at && (
         <div aria-label={t("Background tasks")} className="context-menu bg-tasks" ref={panel} role="dialog" style={{ left: Math.max(8, at.x), top: at.y }}>
@@ -113,11 +103,17 @@ export function BackgroundTasksButton({ sessionId }: { sessionId: string }) {
           {tasks.length === 0 ? (
             <p className="small muted bg-tasks-empty">{t("No background tasks in this session yet. Commands the agent leaves running after its turn show up here.")}</p>
           ) : (
-            <ul className="bg-tasks-list">
-              {tasks.map((task) => (
-                <TaskRow key={`${task.sessionId}|${task.taskId}`} task={task} />
+            <>
+              {[{ title: t("Running"), entries: tasks.filter((task) => task.state === "running") },
+                { title: t("Finished"), entries: tasks.filter((task) => task.state !== "running") }].map(({ title, entries }) => entries.length > 0 && (
+                <section aria-label={title} key={title}>
+                  <h3 className="small muted bg-tasks-group">{title} ({entries.length})</h3>
+                  <ul className="bg-tasks-list">
+                    {entries.map((task) => <TaskRow key={`${task.sessionId}|${task.taskId}`} task={task} />)}
+                  </ul>
+                </section>
               ))}
-            </ul>
+            </>
           )}
         </div>
       )}
@@ -127,6 +123,21 @@ export function BackgroundTasksButton({ sessionId }: { sessionId: string }) {
 
 function TaskRow({ task }: { task: Listed }) {
   const [open, setOpen] = useState(false);
+  const [stopping, setStopping] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const handle = useStore((s) => s.sessions[task.sessionId]?.handle);
+  const stop = async () => {
+    if (!handle || stopping) return;
+    setStopping(true);
+    setError(null);
+    try {
+      await api.sessionBackgroundStop(handle, task.taskId);
+    } catch (reason) {
+      setError((reason as { message?: string })?.message ?? String(reason));
+    } finally {
+      setStopping(false);
+    }
+  };
   const [now, setNow] = useState(Date.now());
   const running = task.state === "running";
   useEffect(() => {
@@ -138,19 +149,30 @@ function TaskRow({ task }: { task: Listed }) {
   const when = running ? t("for {time}", { time: duration(took) }) : t("took {time} · ended {ago} ago", { time: duration(took), ago: duration(now - (task.endedAtUnixMs ?? now)) });
   return (
     <li className={`bg-task bg-task-${task.state}`}>
-      <button aria-expanded={open} className="bg-task-head" onClick={() => setOpen(!open)} type="button">
-        <span aria-hidden="true" className="bg-task-mark" />
-        <span className="bg-task-what">
-          <span className="mono bg-task-command" title={task.command}>
-            {task.command ?? task.description ?? task.taskId}
+      <div className="bg-task-controls">
+        <button aria-expanded={open} className="bg-task-head" onClick={() => setOpen(!open)} type="button">
+          <span aria-hidden="true" className="bg-task-mark" />
+          <span className="bg-task-what">
+            <span className="mono bg-task-command" title={task.command}>
+              {task.command ?? task.description ?? task.taskId}
+            </span>
+            <span className="small muted">
+              {stateWord(task)} {when}
+              {task.description && task.command ? ` · ${task.description}` : ""}
+              {task.side ? ` · ${t("Side Transcript")}` : ""}
+            </span>
           </span>
-          <span className="small muted">
-            {stateWord(task)} {when}
-            {task.description && task.command ? ` · ${task.description}` : ""}
-            {task.side ? ` · ${t("Side Transcript")}` : ""}
-          </span>
-        </span>
-      </button>
+        </button>
+        {running && <button
+          className="bg-task-stop"
+          disabled={stopping || !handle || !task.canStop}
+          onClick={() => void stop()}
+          title={task.canStop ? t("Stop task") : t("Update the Claude provider and reopen this session to enable individual task controls.")}
+          aria-label={t("Stop task: {task}", { task: task.command ?? task.description ?? task.taskId })}
+          type="button"
+        >{stopping ? t("Stopping…") : t("Stop")}</button>}
+      </div>
+      {error && <p className="small bg-task-error" role="alert">{error}</p>}
       {open && <TaskOutput task={task} />}
     </li>
   );

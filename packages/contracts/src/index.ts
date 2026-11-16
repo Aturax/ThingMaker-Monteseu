@@ -316,6 +316,7 @@ export type BackgroundTask = {
   command?: string;
   description?: string;
   outputPath?: string;
+  canStop?: boolean;
   state: BackgroundTaskState;
   exitCode?: number;
   /** How it ended, in the words of its output's last line. */
@@ -1759,6 +1760,7 @@ export const COMMANDS = {
   sessionSubscribe: "session_subscribe",
   sessionSnapshot: "session_snapshot",
   sessionBackgroundOutput: "session_background_output",
+  sessionBackgroundStop: "session_background_stop",
   sessionSubmit: "session_submit",
   sessionSteer: "session_steer",
   sessionEnqueue: "session_enqueue",

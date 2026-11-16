@@ -30,7 +30,8 @@ pub fn initialize_params(client: &ClientIdentity) -> Value {
             "version": client.version,
         },
         "clientCapabilities": {
-            "fs": { "readTextFile": false, "writeTextFile": false }
+            "fs": { "readTextFile": false, "writeTextFile": false },
+            "_meta": { "jetbrains": { "air": { "version": 1, "capabilities": ["asyncTasks"] } } }
         }
     })
 }
@@ -155,6 +156,7 @@ mod tests {
     fn initialize_params_advertise_v1_and_no_unimplemented_capabilities() {
         let params = initialize_params(&ClientIdentity::default());
         assert_eq!(params["protocolVersion"], 1);
+        assert_eq!(params["clientCapabilities"]["_meta"]["jetbrains"]["air"]["capabilities"], json!(["asyncTasks"]));
         assert!(params["clientInfo"]["version"].is_string());
         assert_eq!(params["clientCapabilities"]["fs"]["writeTextFile"], false);
     }

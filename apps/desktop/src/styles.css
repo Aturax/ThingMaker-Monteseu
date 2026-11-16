@@ -7516,13 +7516,10 @@ html[data-platform="android"] { --traffic-lights: 8px; --titlebar: 52px; height:
   box-shadow: 0 0 0 2px var(--panel);
 }
 
-.badge-dot-running {
+.tab-icon .badge-dot-running {
   background: var(--ok);
 }
 
-.badge-dot-ended {
-  background: var(--muted);
-}
 
 .bg-tasks {
   width: 440px;
@@ -7554,7 +7551,30 @@ html[data-platform="android"] { --traffic-lights: 8px; --titlebar: 52px; height:
   gap: 2px;
 }
 
+.bg-tasks-group {
+  margin: 8px 6px 2px;
+  font-weight: 600;
+}
+
+.bg-task-controls {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.bg-task-stop {
+  flex: none;
+  margin-top: 6px;
+}
+
+.bg-task-error {
+  margin: 0 6px 6px;
+  color: var(--error);
+}
+
 .bg-task-head {
+  flex: 1;
+  min-width: 0;
   width: 100%;
   display: flex;
   align-items: flex-start;

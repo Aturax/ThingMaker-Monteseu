@@ -84,6 +84,7 @@ SLOW = float(option("--slow", "0"))
 # A turn that leaves a Bash command running in the background, whose output
 # goes to this file — as Claude Code reports it to a client that is not AIR.
 BACKGROUND = option("--background", None)
+NATIVE_BACKGROUND = option("--native-background", None)
 mode = "default"
 model = "opus"
 effort = "default"
@@ -355,6 +356,15 @@ for line in sys.stdin:
         elif FOLLOW:
             follow_turn(params.get("sessionId"), prompt_text(params))
             send({"jsonrpc": "2.0", "id": request, "result": {"stopReason": "end_turn"}})
+        elif NATIVE_BACKGROUND:
+            session_id = params.get("sessionId")
+            update(session_id, {"sessionUpdate": "async_task_spawned", "asyncTaskId": "native1", "toolCallId": "bash1", "description": "Windows build", "canStop": True, "outputFilePath": "C:/Temp/claude/tasks/native1.output"})
+            if NATIVE_BACKGROUND == "complete":
+                update(session_id, {"sessionUpdate": "async_task_state_update", "asyncTaskId": "native1", "state": "completed"})
+            if NATIVE_BACKGROUND == "busy":
+                hanging["request"] = request
+            else:
+                send({"jsonrpc": "2.0", "id": request, "result": {"stopReason": "end_turn"}})
         elif BACKGROUND:
             session_id = params.get("sessionId")
             call = "toolu_bg1"
@@ -382,6 +392,14 @@ for line in sys.stdin:
             send({"jsonrpc": "2.0", "id": request, "result": {}})
             if ECHO_STEER:
                 update(params.get("sessionId"), {"sessionUpdate": "user_message_chunk", "content": {"type": "text", "text": prompt_text(params)}})
+    elif method == "_session/async_task/stop":
+        assert params.get("sessionId") == SESSION
+        assert params.get("asyncTaskId") == "native1"
+        if NATIVE_BACKGROUND == "refuse":
+            send({"jsonrpc": "2.0", "id": request, "result": {"stopped": False}})
+        else:
+            update(SESSION, {"sessionUpdate": "async_task_state_update", "asyncTaskId": "native1", "state": "stopped"})
+            send({"jsonrpc": "2.0", "id": request, "result": {"stopped": True}})
     elif method == "session/cancel":
         sys.stderr.write("cancel received\n")
         sys.stderr.flush()

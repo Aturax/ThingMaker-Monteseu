@@ -204,6 +204,7 @@ export const api = {
     return call<void>(COMMANDS.sessionSubscribe, { handle, onEvent: channel });
   },
   sessionSnapshot: (handle: SessionHandle) => call<Snapshot>(COMMANDS.sessionSnapshot, { handle }),
+  sessionBackgroundStop: (handle: SessionHandle, taskId: string) => call<void>(COMMANDS.sessionBackgroundStop, { request: { handle, taskId } }),
   sessionBackgroundOutput: (handle: SessionHandle, taskId: string) => call<BackgroundOutput>(COMMANDS.sessionBackgroundOutput, { request: { handle, taskId } }),
   sessionSubmit: (handle: SessionHandle, requestId: string, text: string, attachmentIds: string[] = [], mentions: Mention[] = []) =>
     call<{ requestId: string; outcome: SubmissionOutcome }>(COMMANDS.sessionSubmit, {
