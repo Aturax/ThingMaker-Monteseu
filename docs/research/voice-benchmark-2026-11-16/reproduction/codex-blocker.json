@@ -1,0 +1,4 @@
+{
+  "error_type": "RuntimeError",
+  "error": "No ChatGPT subscription auth; no API-key test authorized"
+}
