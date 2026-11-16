@@ -1,6 +1,10 @@
 # Dirigir ThingMaker por voz: investigación y propuesta de escritorio
 
+Implementación inicial autorizada y desarrollada en `codex/desktop-voice-plan`: Parakeet CPU nativo, descarga verificada, dictado al detener y limpieza opcional con selección independiente de proveedor/modelo. Véase [uso, arquitectura implementada y validación](../voice.md). El resto de este documento conserva la investigación y las alternativas anteriores; el worker de esta primera versión es un hilo nativo con liberación del modelo al terminar, no un proceso auxiliar.
+
 Fecha: 2026-11-16. Estado: propuesta, sin implementación de producto. Ya existe una [primera comparación medida y estimación de costes](../research/voice-benchmark-2026-11-16/README.md), con muestras sintéticas idénticas para los motores locales. Las afirmaciones de «no medido» del cuerpo siguiente corresponden a la investigación inicial; el informe enlazado recoge las pruebas posteriores, sus resultados y los bloqueos restantes.
+
+Actualización posterior: [Codex con el perfil real de ThingMaker](../research/voice-codex-subscription-2026-11-16.md) autentica correctamente mediante ChatGPT, pero `gpt-6-luna` no devuelve transcripciones válidas con `localAudio` ni con audio inline. El control de texto sí funciona. Esta evidencia sustituye el bloqueo inicial de login para esa prueba y desaconseja esa ruta como backend de dictado; no descarta otras interfaces de voz no probadas.
 
 ## 1. Objetivo y decisión propuesta
 

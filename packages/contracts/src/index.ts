@@ -1639,6 +1639,10 @@ export type NotificationSettings = {
   replySuggestionModel?: string;
   /** Missing means Claude, for settings saved before provider selection. */
   replySuggestionProvider?: Provider;
+  /** Independent of reply suggestions. Empty/unset means no dictation cleanup. */
+  voiceCleanupModel?: string;
+  voiceCleanupProvider?: Provider;
+  voiceInputDevice?: string;
   /** Hold off idle sleep while sessions, Big Things or team jobs work. */
   keepAwake: boolean;
   /** ...on battery too (off by default). */
@@ -1902,6 +1906,13 @@ export const COMMANDS = {
   workspacePick: "workspace_pick",
   revealInFinder: "reveal_in_finder",
   replySuggest: "reply_suggest",
+  voiceStatus: "voice_status",
+  voiceDownload: "voice_download",
+  voiceCancelDownload: "voice_cancel_download",
+  voiceDevices: "voice_devices",
+  voiceStart: "voice_start",
+  voiceStop: "voice_stop",
+  voiceCleanup: "voice_cleanup",
   revealPath: "reveal_path",
   quickLook: "quick_look",
   settingsGet: "settings_get",

@@ -3,6 +3,7 @@
  * addressing the person as tú. See GLOSSARY.md for the terms used.
  */
 import { accounts } from "./accounts";
+import { voice } from "./voice";
 import { memberResources } from "./memberResources";
 import { bigthing } from "./bigthing";
 import { local } from "./local";
@@ -13,4 +14,4 @@ import { shell } from "./shell";
 import { ultrareview } from "./ultrareview";
 import { setup } from "./setup";
 
-export const es: Record<string, string> = { ...logic, ...session, ...settings, ...shell, ...bigthing, ...ultrareview, ...local, ...accounts, ...memberResources, ...setup };
+export const es: Record<string, string> = { ...logic, ...session, ...settings, ...shell, ...bigthing, ...ultrareview, ...local, ...accounts, ...memberResources, ...setup, ...voice };

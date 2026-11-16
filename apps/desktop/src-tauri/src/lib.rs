@@ -117,6 +117,7 @@ pub fn run() {
             let resource_dir = app.path().resource_dir().ok();
             let state = state::AppState::initialize(&data_dir, resource_dir.as_deref())
                 .map_err(|error| format!("could not initialize desktop state: {error}"))?;
+            app.manage(std::sync::Arc::new(thingmaker_voice::Service::new(&data_dir)));
             app.manage(state);
             app.manage(commands::screen_stream::ScreenStreams::default());
             titles::set_app(app.handle());
@@ -157,6 +158,9 @@ pub fn run() {
         .on_window_event(|window, event| {
             if window.label() != "main" {
                 return;
+            }
+            if matches!(event, WindowEvent::CloseRequested { .. } | WindowEvent::Focused(false)) {
+                if let Some(voice) = window.app_handle().try_state::<std::sync::Arc<thingmaker_voice::Service>>() { voice.cancel_capture(); }
             }
             if let WindowEvent::CloseRequested { api, .. } = event {
                 let app = window.app_handle().clone();
@@ -396,6 +400,13 @@ pub fn run() {
             commands::delegation::delegation_retry_policy_get,
             commands::delegation::delegation_retry_policy_set,
             commands::suggestions::reply_suggest,
+            commands::voice::voice_status,
+            commands::voice::voice_download,
+            commands::voice::voice_cancel_download,
+            commands::voice::voice_devices,
+            commands::voice::voice_start,
+            commands::voice::voice_stop,
+            commands::voice::voice_cleanup,
             commands::app::settings_get,
             commands::app::settings_set,
             commands::app::app_hide_to_tray,

@@ -6,6 +6,7 @@ import { t } from "../i18n";
 import { useStore, isWorkerIn, sessionTitle, type SessionTab } from "../store";
 import { api } from "../ipc";
 import { ConfigPickers } from "./ConfigPickers";
+import { VoiceInput } from "./VoiceInput";
 import { PendingPrompt } from "./PendingPrompt";
 import { TeamChip } from "./TeamEditor";
 import { FilesPane } from "./FilesPane";
@@ -1401,6 +1402,7 @@ export function SessionPanel({ sessionId }: { sessionId: string }) {
           />
         </div>
         {suggestion && <span className="small muted" id="reply-suggestion-hint">{t("Tab to accept · Esc to dismiss")}</span>}
+        <VoiceInput key={sessionId} target={sessionId} draft={draft} input={composerRef} localOnly={session.snapshot.provider === "local"} disabled={!canSend} onChange={(text) => { dismissSuggestion(); setDraft(sessionId, text); }} />
         <div className="composer-row">
           <button
             aria-label={t("Attach media")}

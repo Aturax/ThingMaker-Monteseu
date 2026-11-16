@@ -1,3 +1,4 @@
+import { VoiceInput } from "./VoiceInput";
 /**
  * A session while its agent starts — a new one, or one being resumed: the
  * chat is there at once, so the person sees something happening and can
@@ -75,6 +76,7 @@ export function StartingPanel() {
             value={starting.queued ? "" : starting.draft}
           />
         </div>
+        <VoiceInput key={starting.workspaceId} target={starting.workspaceId} draft={starting.draft} input={input} localOnly={starting.provider === "local"} disabled={starting.queued} onChange={(text) => setStartingDraft(text, false)} />
       </footer>
     </section>
   );

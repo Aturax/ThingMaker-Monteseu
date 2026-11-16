@@ -46,6 +46,18 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("Settings", () => {
+  it("selects dictation cleanup independently from reply suggestions", async () => {
+    calls.api.voiceStatus = vi.fn(async () => false);
+    calls.api.voiceDevices = vi.fn(async () => []);
+    const saveSettings = vi.fn(async () => undefined);
+    useStore.setState({ view: { kind: "settings", tab: "chat" }, saveSettings,
+      settings: { ...settings, replySuggestionProvider: "claude", replySuggestionModel: "haiku" } } as never);
+    render(<SettingsPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "Dictation cleanup" }));
+    fireEvent.click(screen.getByRole("option", { name: "Codex · gpt-test" }));
+    expect(saveSettings).toHaveBeenCalledWith(expect.objectContaining({ voiceCleanupProvider: "codex", voiceCleanupModel: "gpt-test", replySuggestionProvider: "claude", replySuggestionModel: "haiku" }));
+    await act(async () => {});
+  });
   it("opens on the tab the view asks for, and switches from the bar", () => {
     useStore.setState({ view: { kind: "settings", tab: "chat" } } as never);
     render(<SettingsPanel />);

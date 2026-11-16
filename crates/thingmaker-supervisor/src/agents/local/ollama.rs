@@ -297,11 +297,16 @@ impl Ollama {
     /// A bounded, tool-free completion for small UI helpers. Uses the short
     /// request client's timeout rather than the unbounded streaming client.
     pub fn short_reply(&self, model: &str, instruction: &str, input: &str) -> Result<String, String> {
+        self.bounded_reply(model, instruction, input, 160)
+    }
+
+    /// Longer tool-free text transformations (dictation), still bounded and local-only.
+    pub fn bounded_reply(&self, model: &str, instruction: &str, input: &str, max_tokens: u32) -> Result<String, String> {
         if is_cloud(model) { return Err("reply suggestions require a local model".into()); }
         let result = self.post("/api/chat", &json!({
             "model": model, "stream": false, "think": false, "format": "json",
             "messages": [{"role":"system", "content":instruction}, {"role":"user", "content":input}],
-            "options": {"num_predict": 160}
+            "options": {"num_predict": max_tokens.clamp(1, 4096)}
         }))?;
         result.get("message").and_then(|message| message.get("content")).and_then(Value::as_str)
             .map(str::to_string).ok_or_else(|| "Ollama returned no reply".into())

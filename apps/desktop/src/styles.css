@@ -10872,3 +10872,12 @@ html[data-platform="android"] { --traffic-lights: 8px; --titlebar: 52px; height:
 .main-pane .session-panel {
   max-width: none;
 }
+
+/* Desktop dictation: review stays separate from the live composer. */
+.voice-input { width: 100%; margin: 6px 0; }
+.voice-input .row { gap: 6px; align-items: center; }
+.voice-input button svg { vertical-align: middle; margin-right: 5px; }
+.voice-recording { color: #e96565; }
+.voice-review { margin-top: 8px; padding: 8px; border: 1px solid var(--border); border-radius: 8px; }
+.voice-review textarea { display: block; width: 100%; margin: 6px 0; }
+.voice-input meter { width: 64px; height: 12px; }

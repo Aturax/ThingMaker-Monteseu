@@ -23,6 +23,7 @@ import { useStore, basenameOf, type SettingsTab } from "../store";
 import { api } from "../ipc";
 import { redactText } from "../redact";
 import { chooseLanguage, languageChoice, t, type LanguageChoice } from "../i18n";
+import { VoiceSettings } from "./VoiceSettings";
 import { PhoneSection } from "./PhoneSection";
 import { IntegrationsSettings } from "./IntegrationsPanel";
 import { ProviderMark } from "./ProviderMark";
@@ -333,6 +334,7 @@ function ChatTab({ settings, update }: TabProps) {
         </SettingRow>
       </SettingGroup>
 
+      <VoiceSettings settings={settings} update={update} modelChoices={suggestionChoices} />
       <SettingGroup>
         <Fold name={t("Keyboard shortcuts")}>
           <div className="set-shortcuts">

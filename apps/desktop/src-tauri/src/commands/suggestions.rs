@@ -27,7 +27,10 @@ fn prompt(messages: &[String; 3]) -> CommandResult<String> {
     .to_string())
 }
 
-fn reply(stdout: &[u8]) -> CommandResult<String> {
+#[cfg(test)]
+fn reply(stdout: &[u8]) -> CommandResult<String> { reply_with_limit(stdout, 240) }
+
+fn reply_with_limit(stdout: &[u8], limit: usize) -> CommandResult<String> {
     let result: Value = serde_json::from_slice(stdout).map_err(|_| DesktopError::io("invalid suggestion response"))?;
     if result.get("is_error").and_then(Value::as_bool) == Some(true) {
         return Err(DesktopError::io("suggestion generation failed"));
@@ -53,14 +56,17 @@ fn reply(stdout: &[u8]) -> CommandResult<String> {
         .and_then(Value::as_str)
         .ok_or_else(|| DesktopError::io("invalid suggestion text"))?;
     let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if text.chars().count() > 240 {
+    if text.chars().count() > limit {
         return Ok(String::new());
     }
     Ok(text)
 }
 
 /// Per-invocation isolation; never change a provider's saved settings.
-fn arguments(provider: Provider, model: &str, scratch: &std::path::Path) -> CommandResult<Vec<String>> {
+#[cfg(test)]
+fn arguments(provider: Provider, model: &str, scratch: &std::path::Path) -> CommandResult<Vec<String>> { arguments_for(provider, model, scratch, INSTRUCTION) }
+
+fn arguments_for(provider: Provider, model: &str, scratch: &std::path::Path, instruction: &str) -> CommandResult<Vec<String>> {
     let args = match provider {
         Provider::Claude => vec![
             "--print",
@@ -69,7 +75,7 @@ fn arguments(provider: Provider, model: &str, scratch: &std::path::Path) -> Comm
             "--output-format",
             "json",
             "--system-prompt",
-            INSTRUCTION,
+            instruction,
             "--tools",
             "",
             "--strict-mcp-config",
@@ -124,7 +130,7 @@ fn arguments(provider: Provider, model: &str, scratch: &std::path::Path) -> Comm
         Provider::Gemini => {
             let agents = scratch.join(".agents/agents");
             std::fs::create_dir_all(&agents).map_err(|error| DesktopError::io(error.to_string()))?;
-            std::fs::write(agents.join("reply-suggestion.md"), format!("---\nname: reply-suggestion\ndescription: Draft a short user reply\ntools: []\nmainAgent: true\nsubagent: false\nskills: []\nplugins: []\nmcpServers: []\ncommandExecutionPolicy: off\n---\n{INSTRUCTION}\n"))
+            std::fs::write(agents.join("reply-suggestion.md"), format!("---\nname: reply-suggestion\ndescription: Draft a short user reply\ntools: []\nmainAgent: true\nsubagent: false\nskills: []\nplugins: []\nmcpServers: []\ncommandExecutionPolicy: off\n---\n{instruction}\n"))
                 .map_err(|error| DesktopError::io(error.to_string()))?;
             vec![
                 "-p=",
@@ -148,7 +154,7 @@ fn arguments(provider: Provider, model: &str, scratch: &std::path::Path) -> Comm
     let mut args: Vec<String> = args.into_iter().map(str::to_string).collect();
     if provider == Provider::Codex {
         let instructions = scratch.join("reply-instructions.txt");
-        std::fs::write(&instructions, INSTRUCTION).map_err(|error| DesktopError::io(error.to_string()))?;
+        std::fs::write(&instructions, instruction).map_err(|error| DesktopError::io(error.to_string()))?;
         // Replace the coding-agent prompt instead of attaching project guidance.
         args.extend([
             "-c".into(),
@@ -160,7 +166,10 @@ fn arguments(provider: Provider, model: &str, scratch: &std::path::Path) -> Comm
     Ok(args)
 }
 
-fn provider_reply(provider: Provider, stdout: &[u8]) -> CommandResult<String> {
+#[cfg(test)]
+fn provider_reply(provider: Provider, stdout: &[u8]) -> CommandResult<String> { provider_reply_with_limit(provider, stdout, 240) }
+
+fn provider_reply_with_limit(provider: Provider, stdout: &[u8], limit: usize) -> CommandResult<String> {
     if provider == Provider::Gemini {
         let value = stdout
             .split(|byte| *byte == b'\n')
@@ -176,10 +185,10 @@ fn provider_reply(provider: Provider, stdout: &[u8]) -> CommandResult<String> {
             .get("response")
             .and_then(Value::as_str)
             .ok_or_else(|| DesktopError::io("Antigravity returned no suggestion"))?;
-        return reply(json!({"result":text}).to_string().as_bytes());
+        return reply_with_limit(json!({"result":text}).to_string().as_bytes(), limit);
     }
     if provider != Provider::Codex {
-        return reply(stdout);
+        return reply_with_limit(stdout, limit);
     }
     let mut last = None;
     for line in stdout.split(|byte| *byte == b'\n') {
@@ -193,7 +202,7 @@ fn provider_reply(provider: Provider, stdout: &[u8]) -> CommandResult<String> {
         }
     }
     let text = last.ok_or_else(|| DesktopError::io("Codex returned no suggestion"))?;
-    reply(json!({"result":text}).to_string().as_bytes())
+    reply_with_limit(json!({"result":text}).to_string().as_bytes(), limit)
 }
 
 #[tauri::command]
@@ -204,14 +213,18 @@ pub async fn reply_suggest(messages: [String; 3], state: State<'_, AppState>) ->
         return Ok(String::new());
     };
     let input = prompt(&messages)?;
+    generate(&state, provider, model, input, INSTRUCTION, 240).await
+}
+
+pub(super) async fn generate(state: &AppState, provider: Provider, model: String, input: String, instruction: &'static str, limit: usize) -> CommandResult<String> {
     if provider == Provider::Local {
         let (_, name) = thingmaker_supervisor::agents::local::parse_model(&model);
         let name = name.to_string();
         return tauri::async_runtime::spawn_blocking(move || {
             let text = thingmaker_supervisor::agents::local::ollama::Ollama::local()
-                .short_reply(&name, INSTRUCTION, &input)
+                .bounded_reply(&name, instruction, &input, if limit > 240 { 2048 } else { 160 })
                 .map_err(DesktopError::io)?;
-            reply(json!({"result":text}).to_string().as_bytes())
+            reply_with_limit(json!({"result":text}).to_string().as_bytes(), limit)
         })
         .await
         .map_err(|error| DesktopError::io(error.to_string()))?;
@@ -237,7 +250,7 @@ pub async fn reply_suggest(messages: [String; 3], state: State<'_, AppState>) ->
             _ => {}
         }
     }
-    let args = arguments(provider, &model, scratch.path())?;
+    let args = arguments_for(provider, &model, scratch.path(), instruction)?;
     let mut command = tokio::process::Command::from(thingmaker_supervisor::platform::command(binary));
     command
         .args(args)
@@ -252,7 +265,7 @@ pub async fn reply_suggest(messages: [String; 3], state: State<'_, AppState>) ->
     let input = match provider {
         Provider::Claude => input,
         Provider::Gemini => format!("{}\n", json!({"event":"user","message":{"content":input}})),
-        _ => format!("{INSTRUCTION}\n\n{input}"),
+        _ => format!("{instruction}\n\n{input}"),
     };
     
     tokio::time::timeout(Duration::from_secs(45), async {
@@ -264,7 +277,7 @@ pub async fn reply_suggest(messages: [String; 3], state: State<'_, AppState>) ->
         if !output.status.success() {
             return Err(DesktopError::io("suggestion generation failed"));
         }
-        provider_reply(provider, &output.stdout)
+        provider_reply_with_limit(provider, &output.stdout, limit)
     })
     .await
     .map_err(|_| DesktopError::io("suggestion timed out"))?
@@ -273,6 +286,24 @@ pub async fn reply_suggest(messages: [String; 3], state: State<'_, AppState>) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn dictation_preserves_long_text_without_relaxing_suggestion_limit() {
+        let text = "Do not change the selected files. ".repeat(30);
+        let response = json!({"result":json!({"reply":text}).to_string()}).to_string();
+        assert_eq!(reply_with_limit(response.as_bytes(), 16_000).unwrap(), text.trim());
+        assert_eq!(reply(response.as_bytes()).unwrap(), "");
+    }
+    #[test]
+    fn cleanup_instruction_replaces_suggestion_instruction_for_every_provider() {
+        let scratch = tempfile::tempdir().unwrap();
+        for provider in [Provider::Claude, Provider::Codex, Provider::Gemini] {
+            let args = arguments_for(provider, "chosen", scratch.path(), "ONLY CLEAN DICTATION").unwrap();
+            assert!(!args.iter().any(|s| s.contains("Draft one short")));
+            if provider == Provider::Claude { assert!(args.contains(&"ONLY CLEAN DICTATION".into())); }
+        }
+        assert_eq!(std::fs::read_to_string(scratch.path().join("reply-instructions.txt")).unwrap(), "ONLY CLEAN DICTATION");
+        assert!(std::fs::read_to_string(scratch.path().join(".agents/agents/reply-suggestion.md")).unwrap().contains("ONLY CLEAN DICTATION"));
+    }
     #[test]
     fn provider_formats_are_not_interchangeable() {
         let codex = b"{\"type\":\"thread.started\"}\n{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"{\\\"reply\\\":\\\"Next step\\\"}\"}}\n";

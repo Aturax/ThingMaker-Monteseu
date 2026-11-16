@@ -53,6 +53,7 @@
     }
   },
   "bundle": {
+    "macOS": { "entitlements": "voice.entitlements.plist" },
     "active": true,
     "targets": [
       "app",
@@ -66,6 +67,8 @@
       "icons/icon.ico"
     ],
     "resources": {
+      "../../../docs/voice.md": "licenses/voice.md",
+      "../../../docs/licenses/voice-third-party.txt": "licenses/voice-third-party.txt",
       "../dist-remote/": "remote-ui/"
     }
   }

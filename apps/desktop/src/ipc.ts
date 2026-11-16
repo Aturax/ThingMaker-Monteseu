@@ -179,6 +179,19 @@ export type OpenRequest = {
 const HISTORY_PAGE = 500;
 
 export const api = {
+  voiceStatus: () => call<boolean>(COMMANDS.voiceStatus),
+  voiceDownload: (onProgress: (event: import("./voice").VoiceDownload) => void) => {
+    const channel = new Channel<import("./voice").VoiceDownload>(); channel.onmessage = onProgress;
+    return call<void>(COMMANDS.voiceDownload, { channel });
+  },
+  voiceCancelDownload: () => call<void>(COMMANDS.voiceCancelDownload),
+  voiceDevices: () => call<{ id: string; name: string }[]>(COMMANDS.voiceDevices),
+  voiceStart: (id: string, onEvent: (event: import("./voice").VoiceEvent) => void) => {
+    const channel = new Channel<import("./voice").VoiceEvent>(); channel.onmessage = onEvent;
+    return call<void>(COMMANDS.voiceStart, { id, channel });
+  },
+  voiceStop: (id: string, cancel = false) => call<void>(COMMANDS.voiceStop, { id, cancel }),
+  voiceCleanup: (text: string, localOnly = false) => call<string>(COMMANDS.voiceCleanup, { text, localOnly }),
   screenDevices: () => call<import("@thingmaker/contracts").ScreenDevice[]>(COMMANDS.screenDevices),
   screenCapture: (device: import("@thingmaker/contracts").ScreenDevice) => call<string>(COMMANDS.screenCapture, { device }),
   screenStreamStart: (device: import("@thingmaker/contracts").ScreenDevice, onEvent: (event: import("@thingmaker/contracts").ScreenStreamEvent) => void) => {

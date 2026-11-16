@@ -53,6 +53,9 @@ pub struct NotificationSettings {
     pub reply_suggestion_model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reply_suggestion_provider: Option<thingmaker_supervisor::agents::Provider>,
+    pub voice_cleanup_model: Option<String>,
+    pub voice_cleanup_provider: Option<thingmaker_supervisor::agents::Provider>,
+    pub voice_input_device: Option<String>,
     /// Hold off idle sleep while sessions, Big Things or team jobs work.
     pub keep_awake: bool,
     /// ...and on battery too. Off by default: an overnight run on battery
@@ -77,6 +80,9 @@ impl Default for NotificationSettings {
             claude_orchestrator_effort: None,
             reply_suggestion_model: None,
             reply_suggestion_provider: None,
+            voice_cleanup_model: None,
+            voice_cleanup_provider: None,
+            voice_input_device: None,
             keep_awake: true,
             keep_awake_on_battery: false,
         }
@@ -123,6 +129,8 @@ pub fn settings_set(settings: NotificationSettings, state: State<'_, AppState>) 
     if [&settings.claude_orchestrator_model, &settings.claude_orchestrator_effort].iter().any(|value| value.as_ref().is_some_and(|text| text.len() > 128)) {
         return Err(DesktopError::io("the Claude model or effort is not a valid id"));
     }
+    if settings.voice_input_device.as_ref().is_some_and(|id| id.len() > 1024 || id.chars().any(char::is_control)) { return Err(DesktopError::io("invalid voice input device")); }
+    if settings.voice_cleanup_model.as_ref().is_some_and(|id| id.len() > 128 || id.chars().any(char::is_control)) { return Err(DesktopError::io("invalid voice cleanup model")); }
     if settings.reply_suggestion_model.as_ref().is_some_and(|model| model.len() > 128 || model.chars().any(char::is_control)) {
         return Err(DesktopError::io("invalid reply suggestion model"));
     }
