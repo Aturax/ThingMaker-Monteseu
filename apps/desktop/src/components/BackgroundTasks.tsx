@@ -104,13 +104,15 @@ export function BackgroundTasksButton({ sessionId }: { sessionId: string }) {
             <p className="small muted bg-tasks-empty">{t("No background tasks in this session yet. Commands the agent leaves running after its turn show up here.")}</p>
           ) : (
             <>
-              {[{ title: t("Running"), entries: tasks.filter((task) => task.state === "running") },
-                { title: t("Finished"), entries: tasks.filter((task) => task.state !== "running") }].map(({ title, entries }) => entries.length > 0 && (
+              {[{ title: t("Running"), open: true, entries: tasks.filter((task) => task.state === "running") },
+                { title: t("Finished"), open: false, entries: tasks.filter((task) => task.state !== "running") }].map(({ title, open, entries }) => entries.length > 0 && (
                 <section aria-label={title} key={title}>
-                  <h3 className="small muted bg-tasks-group">{title} ({entries.length})</h3>
-                  <ul className="bg-tasks-list">
-                    {entries.map((task) => <TaskRow key={`${task.sessionId}|${task.taskId}`} task={task} />)}
-                  </ul>
+                  <details open={open}>
+                    <summary className="small muted bg-tasks-group">{title} ({entries.length})</summary>
+                    <ul className="bg-tasks-list">
+                      {entries.map((task) => <TaskRow key={`${task.sessionId}|${task.taskId}`} task={task} />)}
+                    </ul>
+                  </details>
                 </section>
               ))}
             </>

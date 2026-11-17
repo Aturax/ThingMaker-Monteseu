@@ -1,0 +1,83 @@
+[
+  {
+    "name": "orcarouter/Qwen3.8-27B-Uncensored:latest",
+    "capabilities": [
+      "completion",
+      "vision",
+      "tools",
+      "thinking"
+    ]
+  },
+  {
+    "name": "orcarouter/Qwen3.8-27B-Uncensored:q4_K_M",
+    "capabilities": [
+      "completion",
+      "vision",
+      "tools",
+      "thinking"
+    ]
+  },
+  {
+    "name": "qwen3.8:27b",
+    "capabilities": [
+      "completion",
+      "vision",
+      "tools",
+      "thinking"
+    ]
+  },
+  {
+    "name": "nomic-embed-text-v2-moe:latest",
+    "capabilities": [
+      "embedding"
+    ]
+  },
+  {
+    "name": "lfm2.5:8b",
+    "capabilities": [
+      "completion",
+      "tools",
+      "thinking"
+    ]
+  },
+  {
+    "name": "granite4.1:3b",
+    "capabilities": [
+      "completion",
+      "tools"
+    ]
+  },
+  {
+    "name": "nomic-embed-text:latest",
+    "capabilities": [
+      "embedding"
+    ]
+  },
+  {
+    "name": "gemma4:12b",
+    "capabilities": [
+      "completion",
+      "vision",
+      "audio",
+      "tools",
+      "thinking"
+    ]
+  },
+  {
+    "name": "qwen3:4b-instruct",
+    "capabilities": [
+      "tools",
+      "thinking",
+      "completion"
+    ]
+  },
+  {
+    "name": "qwen3.6:35b",
+    "capabilities": [
+      "completion",
+      "vision",
+      "tools",
+      "thinking"
+    ]
+  }
+]

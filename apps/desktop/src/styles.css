@@ -7554,6 +7554,7 @@ html[data-platform="android"] { --traffic-lights: 8px; --titlebar: 52px; height:
 .bg-tasks-group {
   margin: 8px 6px 2px;
   font-weight: 600;
+  cursor: pointer;
 }
 
 .bg-task-controls {
