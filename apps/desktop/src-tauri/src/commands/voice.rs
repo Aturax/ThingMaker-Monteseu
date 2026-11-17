@@ -14,6 +14,50 @@ fn main_window(window: &WebviewWindow) -> CommandResult<()> {
     }
     Ok(())
 }
+
+/// CoreAudio alone can block opening an input before macOS has asked for consent.
+/// Request separately so cancelling/navigation cannot start a late recording.
+#[tauri::command]
+pub async fn voice_permission(window: WebviewWindow) -> CommandResult<()> {
+    main_window(&window)?;
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_av_foundation::{AVAuthorizationStatus, AVCaptureDevice, AVMediaTypeAudio};
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        // AVMediaTypeAudio is an immutable framework constant; no capture is opened here.
+        unsafe {
+            let media = AVMediaTypeAudio
+                .ok_or_else(|| DesktopError::io("Microphone permission API unavailable."))?;
+            match AVCaptureDevice::authorizationStatusForMediaType(media) {
+                AVAuthorizationStatus::Authorized => return Ok(()),
+                AVAuthorizationStatus::NotDetermined => {
+                    let tx = std::sync::Mutex::new(Some(tx));
+                    let handler = block2::RcBlock::new(move |granted: objc2::runtime::Bool| {
+                        if let Some(tx) = tx.lock().unwrap().take() {
+                            let _ = tx.send(granted.as_bool());
+                        }
+                    });
+                    AVCaptureDevice::requestAccessForMediaType_completionHandler(media, &handler);
+                }
+                _ => return Err(microphone_denied()),
+            }
+        }
+        if !rx
+            .await
+            .map_err(|_| DesktopError::io("Microphone permission request interrupted."))?
+        {
+            return Err(microphone_denied());
+        }
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn microphone_denied() -> DesktopError {
+    DesktopError::io(
+        "Microphone access is disabled. Enable ThingMaker in System Settings → Privacy & Security → Microphone, then try again.",
+    )
+}
 #[tauri::command]
 pub fn voice_status(
     window: WebviewWindow,
@@ -51,9 +95,13 @@ pub fn voice_cancel_download(
     Ok(())
 }
 #[tauri::command]
-pub fn voice_devices(window: WebviewWindow) -> CommandResult<Vec<InputDevice>> {
+pub async fn voice_devices(window: WebviewWindow) -> CommandResult<Vec<InputDevice>> {
     main_window(&window)?;
-    thingmaker_voice::devices().map_err(DesktopError::io)
+    // CoreAudio property queries must not block the WebView's event loop.
+    tauri::async_runtime::spawn_blocking(thingmaker_voice::devices)
+        .await
+        .map_err(|e| DesktopError::io(e.to_string()))?
+        .map_err(DesktopError::io)
 }
 #[tauri::command]
 pub fn voice_start(
@@ -64,6 +112,21 @@ pub fn voice_start(
     channel: Channel<Event>,
 ) -> CommandResult<()> {
     main_window(&window)?;
+    #[cfg(target_os = "macos")]
+    unsafe {
+        use objc2_av_foundation::{AVAuthorizationStatus, AVCaptureDevice, AVMediaTypeAudio};
+        let media = AVMediaTypeAudio.ok_or_else(microphone_denied)?;
+        if AVCaptureDevice::authorizationStatusForMediaType(media)
+            != AVAuthorizationStatus::Authorized
+        {
+            return Err(microphone_denied());
+        }
+    }
+    if !window.is_focused().unwrap_or(false) {
+        return Err(DesktopError::io(
+            "Focus the ThingMaker window and start dictation again.",
+        ));
+    }
     let device = load_settings(&state).voice_input_device;
     let owner = service.inner().clone();
     let capture_id = id.clone();

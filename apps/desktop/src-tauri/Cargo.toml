@@ -56,6 +56,9 @@ hyper = { version = "=1.11.1", features = ["http1", "server"] }
 hyper-util = { version = "=0.1.20", features = ["tokio", "service"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "=0.6.4"
+block2 = "=0.6.2"
+objc2-av-foundation = { version = "=0.3.2", default-features = false, features = ["std", "AVCaptureDevice", "AVMediaFormat", "block2"] }
 security-framework = "=3.7.0"
 core-foundation = "=0.10.1"
 

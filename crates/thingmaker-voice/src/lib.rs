@@ -10,8 +10,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
-        mpsc,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -35,6 +34,7 @@ pub enum Event {
     Transcribing,
     Done { text: String },
     Cancelled,
+    Warning { message: String },
     Error { message: String },
 }
 pub type Emit = Arc<dyn Fn(Event) + Send + Sync>;
@@ -240,21 +240,21 @@ impl Service {
         Ok(())
     }
     pub fn stop(&self, id: &str, cancel: bool) {
-        if let Ok(slot) = self.active.lock() {
-            if let Some(c) = slot.as_ref().filter(|c| c.id == id) {
-                if cancel {
-                    c.cancel.store(true, Ordering::Release);
-                }
-                c.stop.store(true, Ordering::Release);
+        if let Ok(slot) = self.active.lock()
+            && let Some(c) = slot.as_ref().filter(|c| c.id == id)
+        {
+            if cancel {
+                c.cancel.store(true, Ordering::Release);
             }
+            c.stop.store(true, Ordering::Release);
         }
     }
     pub fn cancel_capture(&self) {
-        if let Ok(slot) = self.active.lock() {
-            if let Some(c) = slot.as_ref() {
-                c.cancel.store(true, Ordering::Release);
-                c.stop.store(true, Ordering::Release);
-            }
+        if let Ok(slot) = self.active.lock()
+            && let Some(c) = slot.as_ref()
+        {
+            c.cancel.store(true, Ordering::Release);
+            c.stop.store(true, Ordering::Release);
         }
     }
 }
@@ -312,6 +312,105 @@ pub fn devices() -> Result<Vec<InputDevice>, String> {
         .collect()
 }
 
+#[derive(Default)]
+struct CaptureHealth {
+    // Preserve the first cause; never format or log on the real-time thread.
+    failure: AtomicUsize,
+    callbacks: AtomicUsize,
+    frames: AtomicUsize,
+    max_callback_us: AtomicUsize,
+    host_overruns: AtomicUsize,
+}
+impl CaptureHealth {
+    fn fail(&self, code: usize) {
+        let _ = self
+            .failure
+            .compare_exchange(0, code, Ordering::AcqRel, Ordering::Acquire);
+    }
+    fn error(&self) -> Option<String> {
+        let cause = match self.failure.load(Ordering::Acquire) {
+            0 => return None,
+            1 => "The local microphone buffer overflowed. Audio was lost; please record again.",
+            3 => "The microphone was disconnected. Reconnect it and record again.",
+            4 => "Microphone permission was revoked. Enable microphone access and try again.",
+            _ => "The microphone stream failed. Please record again.",
+        };
+        Some(cause.into())
+    }
+}
+
+const AUDIO_INTERRUPTED: &str = "The microphone reported an audio interruption. Review the dictation carefully or record it again.";
+
+fn report_stream_error(health: &CaptureHealth, kind: cpal::ErrorKind) {
+    match kind {
+        // CPAL leaves the stream running for an xrun. Warn; never silently
+        // claim the transcript is complete, and do not discard the whole take.
+        cpal::ErrorKind::Xrun => {
+            health.host_overruns.fetch_add(1, Ordering::Relaxed);
+        }
+        cpal::ErrorKind::DeviceChanged | cpal::ErrorKind::RealtimeDenied => {}
+        cpal::ErrorKind::DeviceNotAvailable => health.fail(3),
+        cpal::ErrorKind::PermissionDenied => health.fail(4),
+        _ => health.fail(5),
+    }
+}
+
+fn warn_if_interrupted(health: &CaptureHealth, warned: &mut bool, emit: &Emit) {
+    if !*warned && health.host_overruns.load(Ordering::Relaxed) > 0 {
+        *warned = true;
+        emit(Event::Warning {
+            message: AUDIO_INTERRUPTED.into(),
+        });
+    }
+}
+
+/// This is the real-time data callback: no allocation, locks, I/O or thread wakeups.
+fn push_mono<T>(data: &[T], channels: usize, tx: &mut rtrb::Producer<f32>, health: &CaptureHealth)
+where
+    T: cpal::SizedSample,
+    f32: cpal::FromSample<T>,
+{
+    let started = Instant::now();
+    if health.failure.load(Ordering::Acquire) != 0 {
+        return;
+    }
+    let frames = data.len() / channels;
+    let Ok(mut chunk) = tx.write_chunk(frames) else {
+        health.fail(1);
+        return;
+    };
+    let (first, second) = chunk.as_mut_slices();
+    for (dst, frame) in first
+        .iter_mut()
+        .chain(second)
+        .zip(data.chunks_exact(channels))
+    {
+        *dst = frame.iter().map(|s| s.to_sample::<f32>()).sum::<f32>() / channels as f32;
+    }
+    chunk.commit_all();
+    health.frames.fetch_add(frames, Ordering::Relaxed);
+    health.callbacks.fetch_add(1, Ordering::Relaxed);
+    health
+        .max_callback_us
+        .fetch_max(started.elapsed().as_micros() as usize, Ordering::Relaxed);
+}
+
+fn drain_audio(rx: &mut rtrb::Consumer<f32>, audio: &mut Vec<f32>, max: usize) -> f32 {
+    let count = rx.slots();
+    let chunk = rx
+        .read_chunk(count)
+        .expect("only this thread consumes audio");
+    let (first, second) = chunk.as_slices();
+    let level = first
+        .iter()
+        .chain(second)
+        .fold(0f32, |peak, x| peak.max(x.abs()));
+    append_bounded(audio, first, max);
+    append_bounded(audio, second, max);
+    chunk.commit_all();
+    level
+}
+
 fn capture(
     folder: &Path,
     device: Option<String>,
@@ -339,28 +438,34 @@ fn capture(
     if !(8000..=192000).contains(&rate) || channels == 0 || channels > 8 {
         return Err("Unsupported microphone format.".into());
     }
-    let (tx, rx) = mpsc::sync_channel::<Vec<f32>>(64);
-    let failed = Arc::new(AtomicBool::new(false));
+    // One second of mono audio, independent of callback block size. Touch its
+    // pages and the bounded final buffer before starting the real-time stream.
+    let (mut tx, mut rx) = rtrb::RingBuffer::<f32>::new(rate as usize);
+    tx.write_chunk(rate as usize).unwrap().commit_all();
+    rx.read_chunk(rate as usize).unwrap().commit_all();
+    let max = rate as usize * MAX_SECONDS as usize;
+    let mut audio = vec![0.; max];
+    audio.clear();
+    let health = Arc::new(CaptureHealth::default());
     let stream = match supported.sample_format() {
         cpal::SampleFormat::F32 => {
-            input_stream::<f32>(&input, config, channels, tx, failed.clone())
+            input_stream::<f32>(&input, config, channels, tx, health.clone())
         }
         cpal::SampleFormat::I16 => {
-            input_stream::<i16>(&input, config, channels, tx, failed.clone())
+            input_stream::<i16>(&input, config, channels, tx, health.clone())
         }
         cpal::SampleFormat::U16 => {
-            input_stream::<u16>(&input, config, channels, tx, failed.clone())
+            input_stream::<u16>(&input, config, channels, tx, health.clone())
         }
         cpal::SampleFormat::I32 => {
-            input_stream::<i32>(&input, config, channels, tx, failed.clone())
+            input_stream::<i32>(&input, config, channels, tx, health.clone())
         }
         _ => return Err("Unsupported microphone sample format.".into()),
     }?;
     stream.play().map_err(err)?;
     let started = Instant::now();
-    let max = rate as usize * MAX_SECONDS as usize;
-    let mut audio = Vec::with_capacity(max);
     let mut last = Instant::now();
+    let mut warned = false;
     emit(Event::Recording {
         seconds: 0.,
         level: 0.,
@@ -369,29 +474,35 @@ fn capture(
         && started.elapsed().as_secs() < MAX_SECONDS as u64
         && audio.len() < max
     {
-        if failed.load(Ordering::Acquire) {
-            return Err(
-                "Microphone disconnected or audio capture overflowed. Please try again.".into(),
-            );
+        if health.failure.load(Ordering::Acquire) != 0 {
+            break;
         }
-        if let Ok(chunk) = rx.recv_timeout(Duration::from_millis(50)) {
-            let level = chunk.iter().fold(0f32, |peak, x| peak.max(x.abs()));
-            append_bounded(&mut audio, &chunk, max);
-            if last.elapsed() >= Duration::from_millis(100) {
-                emit(Event::Recording {
-                    seconds: started.elapsed().as_secs_f32(),
-                    level,
-                });
-                last = Instant::now();
-            }
+        warn_if_interrupted(&health, &mut warned, emit);
+        let level = drain_audio(&mut rx, &mut audio, max);
+        if last.elapsed() >= Duration::from_millis(100) {
+            emit(Event::Recording {
+                seconds: started.elapsed().as_secs_f32(),
+                level,
+            });
+            last = Instant::now();
         }
+        std::thread::sleep(Duration::from_millis(10));
     }
     drop(stream);
-    for chunk in rx.try_iter() {
-        append_bounded(&mut audio, &chunk, max);
-    }
-    if failed.load(Ordering::Acquire) {
-        return Err("Audio capture failed. Please try again.".into());
+    drain_audio(&mut rx, &mut audio, max);
+    warn_if_interrupted(&health, &mut warned, emit);
+    tracing::info!(
+        sample_rate = rate,
+        channels,
+        callbacks = health.callbacks.load(Ordering::Relaxed),
+        frames = health.frames.load(Ordering::Relaxed),
+        max_callback_us = health.max_callback_us.load(Ordering::Relaxed),
+        failure = health.failure.load(Ordering::Acquire),
+        host_overruns = health.host_overruns.load(Ordering::Relaxed),
+        "voice capture finished"
+    );
+    if let Some(error) = health.error() {
+        return Err(error);
     }
     if control.cancel.load(Ordering::Acquire) {
         return Ok(String::new());
@@ -407,31 +518,19 @@ fn input_stream<T>(
     device: &cpal::Device,
     config: cpal::StreamConfig,
     channels: usize,
-    tx: mpsc::SyncSender<Vec<f32>>,
-    failed: Arc<AtomicBool>,
+    mut tx: rtrb::Producer<f32>,
+    health: Arc<CaptureHealth>,
 ) -> Result<cpal::Stream, String>
 where
     T: cpal::SizedSample,
     f32: cpal::FromSample<T>,
 {
-    let errors = failed.clone();
+    let errors = health.clone();
     device
         .build_input_stream::<T, _, _>(
             config,
-            move |data, _| {
-                let mono: Vec<f32> = data
-                    .chunks_exact(channels)
-                    .map(|frame| {
-                        frame.iter().map(|s| s.to_sample::<f32>()).sum::<f32>() / channels as f32
-                    })
-                    .collect();
-                if tx.try_send(mono).is_err() {
-                    failed.store(true, Ordering::Release);
-                }
-            },
-            move |_| {
-                errors.store(true, Ordering::Release);
-            },
+            move |data, _| push_mono(data, channels, &mut tx, &health),
+            move |error| report_stream_error(&errors, error.kind()),
             None,
         )
         .map_err(err)
@@ -440,6 +539,107 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        alloc::{GlobalAlloc, Layout, System},
+        cell::Cell,
+    };
+
+    // Count only allocations on the test's own thread, after setup. Other
+    // concurrently running tests cannot make the real-time assertion flaky.
+    thread_local! {
+        static TRACK: Cell<bool> = const { Cell::new(false) };
+        static ALLOCATIONS: Cell<usize> = const { Cell::new(0) };
+    }
+    struct CountingAllocator;
+    #[global_allocator]
+    static ALLOCATOR: CountingAllocator = CountingAllocator;
+    fn count_allocation() {
+        let _ = TRACK.try_with(|track| {
+            if track.get() {
+                ALLOCATIONS.with(|count| count.set(count.get() + 1));
+            }
+        });
+    }
+    // SAFETY: Every operation forwards the same pointer/layout to System;
+    // the thread-local counters never allocate or change allocator semantics.
+    unsafe impl GlobalAlloc for CountingAllocator {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            count_allocation();
+            unsafe { System.alloc(layout) }
+        }
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            count_allocation();
+            unsafe { System.dealloc(ptr, layout) }
+        }
+        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, size: usize) -> *mut u8 {
+            count_allocation();
+            unsafe { System.realloc(ptr, layout, size) }
+        }
+        unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+            count_allocation();
+            unsafe { System.alloc_zeroed(layout) }
+        }
+    }
+
+    #[test]
+    fn realtime_callback_never_allocates_even_when_wrapping_or_full() {
+        let (mut tx, mut rx) = rtrb::RingBuffer::new(4);
+        let health = CaptureHealth::default();
+        let mut audio = Vec::with_capacity(16);
+        ALLOCATIONS.with(|c| c.set(0));
+        TRACK.with(|c| c.set(true));
+        push_mono(&[1f32, 0., 0., 1., -1., 1.], 2, &mut tx, &health);
+        drain_audio(&mut rx, &mut audio, 16);
+        push_mono(&[1i16, 2, 3, 4], 1, &mut tx, &health); // wraps
+        push_mono(&[1f32], 1, &mut tx, &health); // full; fail without allocation
+        TRACK.with(|c| c.set(false));
+        assert_eq!(ALLOCATIONS.with(Cell::get), 0);
+        assert_eq!(health.failure.load(Ordering::Acquire), 1);
+        assert_eq!(audio, [0.5, 0.5, 0.]);
+    }
+
+    #[test]
+    fn host_xrun_warns_once_and_keeps_capturing_following_frames() {
+        let health = CaptureHealth::default();
+        let (mut tx, mut rx) = rtrb::RingBuffer::new(8);
+        push_mono(&[0.1f32, 0.2], 1, &mut tx, &health);
+        report_stream_error(&health, cpal::ErrorKind::Xrun);
+        report_stream_error(&health, cpal::ErrorKind::Xrun);
+        push_mono(&[0.3f32, 0.4], 1, &mut tx, &health);
+        let mut audio = Vec::new();
+        drain_audio(&mut rx, &mut audio, 8);
+        assert_eq!(audio, [0.1, 0.2, 0.3, 0.4]);
+        assert!(health.error().is_none());
+        let (send, recv) = std::sync::mpsc::channel();
+        let emit: Emit = Arc::new(move |e| send.send(e).unwrap());
+        let mut warned = false;
+        warn_if_interrupted(&health, &mut warned, &emit);
+        warn_if_interrupted(&health, &mut warned, &emit);
+        assert!(matches!(recv.try_recv(), Ok(Event::Warning { .. })));
+        assert!(recv.try_recv().is_err());
+    }
+
+    #[test]
+    fn real_queue_overflow_and_disconnection_are_fatal_and_distinct() {
+        let overflow = CaptureHealth::default();
+        let (mut tx, mut rx) = rtrb::RingBuffer::new(2);
+        push_mono(&[1f32, 2.], 1, &mut tx, &overflow);
+        push_mono(&[3f32], 1, &mut tx, &overflow);
+        assert!(
+            overflow
+                .error()
+                .unwrap()
+                .contains("local microphone buffer overflowed")
+        );
+        let mut audio = Vec::new();
+        drain_audio(&mut rx, &mut audio, 8);
+        assert_eq!(audio, [1., 2.]); // never overwrite queued audio
+        let disconnected = CaptureHealth::default();
+        report_stream_error(&disconnected, cpal::ErrorKind::DeviceNotAvailable);
+        assert!(disconnected.error().unwrap().contains("disconnected"));
+        report_stream_error(&disconnected, cpal::ErrorKind::PermissionDenied);
+        assert!(disconnected.error().unwrap().contains("disconnected")); // first cause wins
+    }
     #[test]
     fn audio_is_bounded_even_when_stop_has_pending_frames() {
         let mut samples = vec![1., 2.];

@@ -14,6 +14,7 @@ export function VoiceInput(props: Props) {
   const [seconds, setSeconds] = useState(0);
   const [level, setLevel] = useState(0);
   const [error, setError] = useState("");
+  const [warning, setWarning] = useState("");
   const [needsModel, setNeedsModel] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
   const [undo, setUndo] = useState<{ before: string; after: string } | null>(null);
@@ -26,7 +27,7 @@ export function VoiceInput(props: Props) {
   const cancel = () => {
     const id = run.current; run.current = null;
     if (id) void api.voiceStop(id, true).catch(() => {});
-    setPhase("idle"); setResult(null); setLevel(0);
+    setPhase("idle"); setResult(null); setLevel(0); setWarning("");
   };
   useEffect(() => {
     const stop = () => { if (run.current) cancel(); };
@@ -42,7 +43,7 @@ export function VoiceInput(props: Props) {
 
   async function start() {
     if (props.disabled || run.current) return;
-    setError(""); setNeedsModel(false); setResult(null); setUndo(null); setPhase("preparing");
+    setError(""); setWarning(""); setNeedsModel(false); setResult(null); setUndo(null); setPhase("preparing");
     const id = crypto.randomUUID(); run.current = id;
     const current = latest.current;
     const snapshot = { base: current.draft, start: current.input.current?.selectionStart ?? current.draft.length, end: current.input.current?.selectionEnd ?? current.draft.length };
@@ -50,11 +51,16 @@ export function VoiceInput(props: Props) {
     try {
       if (!await api.voiceStatus()) { if (run.current === id) { run.current = null; setNeedsModel(true); setPhase("idle"); } return; }
       if (run.current !== id) return;
+      setPhase("permission");
+      await api.voicePermission();
+      if (run.current !== id) return;
+      setPhase("preparing");
       await api.voiceStart(id, (event: VoiceEvent) => {
         if (run.current !== id) return;
         if (event.type === "recording") { setPhase("recording"); setSeconds(event.seconds); setLevel(event.level); }
         else if (event.type === "preparing" || event.type === "transcribing") setPhase(event.type);
         else if (event.type === "cancelled") { run.current = null; setPhase("idle"); }
+        else if (event.type === "warning") setWarning(t(event.message));
         else if (event.type === "error") { run.current = null; setPhase("idle"); setError(event.message); }
         else if (event.type === "done") {
           setLevel(0);
@@ -97,12 +103,13 @@ export function VoiceInput(props: Props) {
       </button>
       {busy && <button type="button" className="button small" onClick={cancel}>{t("Cancel")}</button>}
       {busy && <span className="small muted" role="status">
-        {phase === "preparing" ? t("Preparing voice model…") : phase === "recording" ? t("Recording {seconds}s / 120s", { seconds: Math.floor(seconds) }) : phase === "transcribing" ? t("Transcribing on this computer…") : phase === "cleaning" ? t("Cleaning dictation…") : ""}
+        {phase === "permission" ? t("Waiting for microphone permission…") : phase === "preparing" ? t("Preparing voice model…") : phase === "recording" ? t("Recording {seconds}s / 120s", { seconds: Math.floor(seconds) }) : phase === "transcribing" ? t("Transcribing on this computer…") : phase === "cleaning" ? t("Cleaning dictation…") : ""}
       </span>}
       {phase === "recording" && <meter min={0} max={1} value={Math.min(1, level * 5)} aria-label={t("Microphone level")} />}
     </div>
     {needsModel && <p className="small">{t("Download the local voice model in Settings to start dictating.")} <button type="button" className="button small" onClick={() => setView({ kind: "settings", tab: "chat" })}>{t("Settings")}</button></p>}
     {error && <p className="small" role="alert">{error}</p>}
+    {warning && <p className="small" role="alert">{warning}</p>}
     {result && <div className="voice-review">
       <label className="small">{t("Review dictation before inserting")}
         <textarea className="textarea" rows={3} value={result.text} onChange={(e) => setResult({ ...result, text: e.target.value, edited: true })} />
@@ -110,7 +117,7 @@ export function VoiceInput(props: Props) {
       <div className="row wrap">
         <button type="button" className="button small" disabled={!result.text.trim()} onClick={() => {
           const before = latest.current.draft; const after = insertDictation(before, result.snapshot, result.text);
-          run.current = null; setPhase("idle"); props.onChange(after); setUndo({ before, after }); setResult(null); props.input.current?.focus();
+          run.current = null; setPhase("idle"); props.onChange(after); setUndo({ before, after }); setResult(null); setWarning(""); props.input.current?.focus();
         }}>{t("Insert dictation")}</button>
         <button type="button" className="button small" onClick={() => setResult({ ...result, text: result.raw, edited: true })}>{t("Use original")}</button>
         <button type="button" className="button small" onClick={cancel}>{t("Discard")}</button>

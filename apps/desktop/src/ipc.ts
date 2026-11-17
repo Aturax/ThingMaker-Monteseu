@@ -180,6 +180,7 @@ const HISTORY_PAGE = 500;
 
 export const api = {
   voiceStatus: () => call<boolean>(COMMANDS.voiceStatus),
+  voicePermission: () => call<void>(COMMANDS.voicePermission),
   voiceDownload: (onProgress: (event: import("./voice").VoiceDownload) => void) => {
     const channel = new Channel<import("./voice").VoiceDownload>(); channel.onmessage = onProgress;
     return call<void>(COMMANDS.voiceDownload, { channel });

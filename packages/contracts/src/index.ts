@@ -1907,6 +1907,7 @@ export const COMMANDS = {
   revealInFinder: "reveal_in_finder",
   replySuggest: "reply_suggest",
   voiceStatus: "voice_status",
+  voicePermission: "voice_permission",
   voiceDownload: "voice_download",
   voiceCancelDownload: "voice_cancel_download",
   voiceDevices: "voice_devices",

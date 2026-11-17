@@ -159,8 +159,10 @@ pub fn run() {
             if window.label() != "main" {
                 return;
             }
-            if matches!(event, WindowEvent::CloseRequested { .. } | WindowEvent::Focused(false)) {
-                if let Some(voice) = window.app_handle().try_state::<std::sync::Arc<thingmaker_voice::Service>>() { voice.cancel_capture(); }
+            if matches!(event, WindowEvent::CloseRequested { .. } | WindowEvent::Focused(false))
+                && let Some(voice) = window.app_handle().try_state::<std::sync::Arc<thingmaker_voice::Service>>()
+            {
+                voice.cancel_capture();
             }
             if let WindowEvent::CloseRequested { api, .. } = event {
                 let app = window.app_handle().clone();
@@ -401,6 +403,7 @@ pub fn run() {
             commands::delegation::delegation_retry_policy_set,
             commands::suggestions::reply_suggest,
             commands::voice::voice_status,
+            commands::voice::voice_permission,
             commands::voice::voice_download,
             commands::voice::voice_cancel_download,
             commands::voice::voice_devices,

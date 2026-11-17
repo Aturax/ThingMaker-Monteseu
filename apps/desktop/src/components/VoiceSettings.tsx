@@ -3,20 +3,19 @@ import { PROVIDER_LABELS, type NotificationSettings, type Provider } from "@thin
 import { api } from "../ipc";
 import { t } from "../i18n";
 import { IS_REMOTE } from "../remote/mode";
-import { voiceError, type VoiceDownload } from "../voice";
+import { voiceError } from "../voice";
+import { useVoiceModel } from "../voiceModel";
 import { Select, SettingGroup, SettingRow, type Choice } from "./settings/controls";
 
 export function VoiceSettings({ settings, update, modelChoices }: { settings: NotificationSettings; update: (patch: Partial<NotificationSettings>) => void; modelChoices: Choice<string>[] }) {
-  const [ready, setReady] = useState(false);
+  const { ready, busy, progress, error, refresh, download, cancel } = useVoiceModel();
   const [devices, setDevices] = useState<{ id: string; name: string }[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [progress, setProgress] = useState<VoiceDownload | null>(null);
-  const [error, setError] = useState("");
+  const [deviceError, setDeviceError] = useState("");
   useEffect(() => {
     if (IS_REMOTE) return;
     let live = true;
-    void Promise.resolve().then(() => api.voiceStatus()).then((value) => { if (live) setReady(value); }).catch(() => {});
-    void Promise.resolve().then(() => api.voiceDevices()).then((value) => { if (live) setDevices(value); }).catch(() => {});
+    void refresh();
+    void Promise.resolve().then(() => api.voiceDevices()).then((value) => { if (live) setDevices(value); }).catch((e) => { if (live) setDeviceError(voiceError(e)); });
     return () => { live = false; };
   }, []);
   if (IS_REMOTE) return null;
@@ -28,15 +27,17 @@ export function VoiceSettings({ settings, update, modelChoices }: { settings: No
   return <SettingGroup>
     <SettingRow name={t("Voice dictation")} hint={t("Parakeet v3 · CPU · Spanish and English detected automatically")}
       info={t("Audio stays on this computer. Stop recording to transcribe, review the text, then insert it. Maximum 2 minutes. Ctrl/Cmd+Shift+D starts or stops; Esc cancels.")}>
-      {ready ? <span className="small">{t("Voice model ready")}</span> : <button type="button" className="button small" disabled={busy} onClick={() => {
-        setBusy(true); setError(""); setProgress(null);
-        void api.voiceDownload(setProgress).then(() => setReady(true)).catch((e) => setError(voiceError(e))).finally(() => setBusy(false));
-      }}>{t("Download voice model (465 MiB)")}</button>}
-      {busy && <><span className="small" role="status">{progress?.phase === "verifying" ? t("Verifying voice model…") : t("Downloading voice model: {percent}%", { percent: Math.floor(100 * (progress?.received ?? 0) / (progress?.total || 1)) })}</span><button type="button" className="button small" onClick={() => void api.voiceCancelDownload().catch((e) => setError(voiceError(e)))}>{t("Cancel")}</button></>}
+      {ready ? <span className="small">{t("Voice model ready")}</span> : <button type="button" className="button small" disabled={busy} onClick={() => void download()}>{t("Download voice model (465 MiB)")}</button>}
+      {busy && <><span className="small" role="status">{progress?.phase === "verifying" ? t("Verifying voice model…") : t("Downloading voice model: {percent}%", { percent: Math.floor(100 * (progress?.received ?? 0) / (progress?.total || 1)) })}</span><button type="button" className="button small" onClick={() => void cancel()}>{t("Cancel")}</button></>}
       {error && <span className="small" role="alert">{error}</span>}
     </SettingRow>
     <SettingRow name={t("Microphone")}>
       <Select label={t("Microphone")} choices={inputs} value={settings.voiceInputDevice ?? ""} onChange={(voiceInputDevice) => update({ voiceInputDevice })} />
+      <button type="button" className="button small" onClick={() => {
+        setDeviceError("");
+        void api.voiceDevices().then(setDevices).catch((e) => setDeviceError(voiceError(e)));
+      }}>{t("Refresh microphones")}</button>
+      {deviceError && <span className="small" role="alert">{deviceError}</span>}
     </SettingRow>
     <SettingRow name={t("Dictation cleanup")} hint={t("Optional; independent of reply suggestions")}
       info={t("The selected provider receives only the transcript, using its current account. Cloud providers send that text off this computer. The original stays available; cleanup never sends your message.")}>

@@ -10,6 +10,7 @@ import type { NotificationSettings } from "@thingmaker/contracts";
 let emit: (e: VoiceEvent) => void;
 beforeEach(() => {
   vi.spyOn(api, "voiceStatus").mockResolvedValue(true);
+  vi.spyOn(api, "voicePermission").mockResolvedValue();
   vi.spyOn(api, "voiceStart").mockImplementation(async (_, cb) => { emit = cb; cb({ type: "recording", seconds: 0, level: 0 }); });
   vi.spyOn(api, "voiceStop").mockResolvedValue();
   useStore.setState({ settings: {} as NotificationSettings });
@@ -47,6 +48,30 @@ it("late cleanup cannot replace a user-edited transcript", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Use original" }));
   expect((screen.getByRole("textbox", { name: "Review dictation before inserting" }) as HTMLTextAreaElement).value).toBe("raw text");
 });
+it("keeps the original available when cleanup fails", async () => {
+  vi.spyOn(api, "voiceCleanup").mockRejectedValue(new Error("provider unavailable"));
+  useStore.setState({ settings: { voiceCleanupModel: "chosen", voiceCleanupProvider: "codex" } as NotificationSettings });
+  render(<Composer />); await start();
+  act(() => emit({ type: "done", text: "Do not change the limit of 15." }));
+  await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Cleanup failed"));
+  expect((screen.getByRole("textbox", { name: "Review dictation before inserting" }) as HTMLTextAreaElement).value).toBe("Do not change the limit of 15.");
+  expect((screen.getByRole("textbox", { name: "Composer" }) as HTMLTextAreaElement).value).toBe("existing draft");
+});
+it("keeps an audio interruption warning visible through recording, review and failed cleanup", async () => {
+  vi.spyOn(api, "voiceCleanup").mockRejectedValue(new Error("provider unavailable"));
+  useStore.setState({ settings: { voiceCleanupModel: "chosen", voiceCleanupProvider: "codex" } as NotificationSettings });
+  render(<Composer />); await start();
+  const warning = "The microphone reported an audio interruption. Review the dictation carefully or record it again.";
+  act(() => emit({ type: "warning", message: warning }));
+  expect(screen.getByText(warning)).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Stop dictation" })).toBeTruthy();
+  act(() => emit({ type: "done", text: "Check this transcript" }));
+  await waitFor(() => expect(screen.getByText("Cleanup failed. Your original dictation is available.")).toBeTruthy());
+  expect(screen.getByText(warning)).toBeTruthy();
+  expect((screen.getByRole("textbox", { name: "Composer" }) as HTMLTextAreaElement).value).toBe("existing draft");
+  fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+  expect(screen.queryByText(warning)).toBeNull();
+});
 it("never cleans a local session through a cloud provider", async () => {
   const clean = vi.spyOn(api, "voiceCleanup");
   useStore.setState({ settings: { voiceCleanupModel: "chosen", voiceCleanupProvider: "codex" } as NotificationSettings });
@@ -55,6 +80,42 @@ it("never cleans a local session through a cloud provider", async () => {
 });
 it("cancels native capture when its composer unmounts", async () => {
   const view = render(<Composer />); await start(); view.unmount();
+  expect(api.voiceStop).toHaveBeenCalledWith(expect.any(String), true);
+});
+it("never opens a microphone after cancellation while macOS permission is pending", async () => {
+  let grant!: () => void;
+  vi.mocked(api.voicePermission).mockImplementation(() => new Promise((resolve) => { grant = resolve; }));
+  render(<Composer />);
+  fireEvent.click(screen.getByRole("button", { name: "Dictate" }));
+  await waitFor(() => expect(api.voicePermission).toHaveBeenCalled());
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  await act(async () => grant());
+  expect(api.voiceStart).not.toHaveBeenCalled();
+});
+it("shows permission denial without opening a microphone and allows retry", async () => {
+  vi.mocked(api.voicePermission).mockRejectedValueOnce({ message: "Microphone access is disabled." });
+  render(<Composer />);
+  fireEvent.click(screen.getByRole("button", { name: "Dictate" }));
+  await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Microphone access is disabled."));
+  expect(api.voiceStart).not.toHaveBeenCalled();
+  await start();
+});
+it("uses the Mac shortcut to stop and Escape to cancel without touching the draft", async () => {
+  render(<Composer />);
+  fireEvent.keyDown(window, { key: "D", metaKey: true, shiftKey: true });
+  await waitFor(() => expect(api.voiceStart).toHaveBeenCalled());
+  fireEvent.keyDown(window, { key: "D", metaKey: true, shiftKey: true });
+  expect(api.voiceStop).toHaveBeenLastCalledWith(expect.any(String));
+  fireEvent.keyDown(window, { key: "Escape" });
+  act(() => emit({ type: "done", text: "stale result" }));
+  expect(api.voiceStop).toHaveBeenLastCalledWith(expect.any(String), true);
+  expect((screen.getByRole("textbox", { name: "Composer" }) as HTMLTextAreaElement).value).toBe("existing draft");
+});
+it("cancels on loss of focus and ignores later native events", async () => {
+  render(<Composer />); await start();
+  fireEvent(window, new Event("blur"));
+  act(() => emit({ type: "done", text: "stale result" }));
+  expect(screen.queryByText("Review dictation before inserting")).toBeNull();
   expect(api.voiceStop).toHaveBeenCalledWith(expect.any(String), true);
 });
 it("honours the captured selection only while the draft is unchanged", () => {
