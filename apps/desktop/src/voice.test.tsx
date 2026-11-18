@@ -122,3 +122,42 @@ it("honours the captured selection only while the draft is unchanged", () => {
   expect(insertDictation("hello world", { base: "hello world", start: 6, end: 11 }, "friend")).toBe("hello friend");
   expect(insertDictation("edited", { base: "hello world", start: 6, end: 11 }, "friend")).toBe("edited\nfriend");
 });
+it("rewrites provisional review text, protects the draft and waits for the final pass before insertion", async () => {
+  render(<Composer />); await start();
+  act(() => emit({ type: "partial", text: "Set the limit to fifteen" }));
+  const review = () => screen.getByRole("textbox", { name: "Review dictation before inserting" }) as HTMLTextAreaElement;
+  expect(review().value).toBe("Set the limit to fifteen");
+  expect(review().readOnly).toBe(true);
+  expect((screen.getByRole("button", { name: "Insert dictation" }) as HTMLButtonElement).disabled).toBe(true);
+  act(() => emit({ type: "partial", text: "Set the limit to fifty" }));
+  expect(review().value).toBe("Set the limit to fifty");
+  expect((screen.getByRole("textbox", { name: "Composer" }) as HTMLTextAreaElement).value).toBe("existing draft");
+  fireEvent.click(screen.getByRole("button", { name: "Stop dictation" }));
+  act(() => { emit({ type: "partial", text: "late preview" }); emit({ type: "recording", seconds: 7, level: 0.1 }); });
+  expect(review().value).toBe("Set the limit to fifty");
+  expect(screen.getByText("Transcribing on this computer…")).toBeTruthy();
+  act(() => emit({ type: "done", text: "Do not change the limit yet." }));
+  expect(review().value).toBe("Do not change the limit yet.");
+  expect(review().readOnly).toBe(false);
+  fireEvent.change(review(), { target: { value: "Reviewed final text" } });
+  fireEvent.click(screen.getByRole("button", { name: "Insert dictation" }));
+  expect((screen.getByRole("textbox", { name: "Composer" }) as HTMLTextAreaElement).value).toContain("Reviewed final text");
+});
+it("never sends provisional text to cleanup and clears it when the final result is empty", async () => {
+  const clean = vi.spyOn(api, "voiceCleanup");
+  useStore.setState({ settings: { voiceCleanupModel: "chosen", voiceCleanupProvider: "codex" } as NotificationSettings });
+  render(<Composer />); await start();
+  act(() => emit({ type: "partial", text: "Possible speech" }));
+  expect(clean).not.toHaveBeenCalled();
+  act(() => emit({ type: "done", text: "" }));
+  expect(screen.queryByRole("textbox", { name: "Review dictation before inserting" })).toBeNull();
+  expect(screen.getByRole("alert").textContent).toContain("No speech was recognized");
+});
+it("discards provisional results on cancellation and ignores late updates", async () => {
+  render(<Composer />); await start();
+  act(() => emit({ type: "partial", text: "Provisional words" }));
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  act(() => { emit({ type: "partial", text: "late" }); emit({ type: "done", text: "late final" }); });
+  expect(screen.queryByRole("textbox", { name: "Review dictation before inserting" })).toBeNull();
+  expect((screen.getByRole("textbox", { name: "Composer" }) as HTMLTextAreaElement).value).toBe("existing draft");
+});

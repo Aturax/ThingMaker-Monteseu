@@ -1,4 +1,6 @@
 export const voice: Record<string, string> = {
+  "Provisional transcription · updates about every 2 seconds. Stop recording to review and edit.": "Transcripción provisional · se actualiza aproximadamente cada 2 segundos. Termina la grabación para revisar y editar.",
+  "Live preview is unavailable. Stop recording for the final transcription.": "La vista previa no está disponible. Termina la grabación para obtener la transcripción final.",
   "The microphone reported an audio interruption. Review the dictation carefully or record it again.": "El micrófono ha indicado una interrupción del audio. Revisa el dictado con atención o vuelve a grabarlo.",
   "Voice dictation": "Dictado por voz",
   "Dictate": "Dictar",
@@ -20,7 +22,7 @@ export const voice: Record<string, string> = {
   "System default microphone": "Micrófono predeterminado del sistema",
   "Saved microphone (not connected)": "Micrófono guardado (no conectado)",
   "Parakeet v3 · CPU · Spanish and English detected automatically": "Parakeet v3 · CPU · Detección automática de español e inglés",
-  "Audio stays on this computer. Stop recording to transcribe, review the text, then insert it. Maximum 2 minutes. Ctrl/Cmd+Shift+D starts or stops; Esc cancels.": "El audio se queda en este ordenador. Termina la grabación para transcribir, revisa el texto e insértalo. Máximo 2 minutos. Ctrl/Cmd+Mayús+D inicia o termina; Esc cancela.",
+  "Audio stays on this computer. Provisional text updates about every 2 seconds. Stop for a final transcription, then review and insert. Maximum 2 minutes. Ctrl/Cmd+Shift+D starts or stops; Esc cancels.": "El audio se queda en este ordenador. El texto provisional se actualiza aproximadamente cada 2 segundos. Termina la grabación para obtener la transcripción final, revisarla e insertarla. Máximo 2 minutos. Ctrl/Cmd+Mayús+D inicia o termina; Esc cancela.",
   "Voice model ready": "Modelo de voz listo",
   "Download voice model (465 MiB)": "Descargar modelo de voz (465 MiB)",
   "Verifying voice model…": "Verificando el modelo de voz…",

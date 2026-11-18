@@ -5,7 +5,7 @@ import { t } from "../i18n";
 import { IS_REMOTE } from "../remote/mode";
 import { insertDictation, voiceError, type VoiceSnapshot, type VoiceEvent } from "../voice";
 
-type Result = { raw: string; text: string; edited: boolean; snapshot: VoiceSnapshot };
+type Result = { raw: string; text: string; edited: boolean; final: boolean; snapshot: VoiceSnapshot };
 type Props = { target: string; draft: string; onChange: (text: string) => void; input: RefObject<HTMLTextAreaElement | null>; disabled?: boolean; localOnly?: boolean };
 
 /** Review first: a transcript or late cleanup can never send or overwrite a live draft. */
@@ -19,13 +19,14 @@ export function VoiceInput(props: Props) {
   const [result, setResult] = useState<Result | null>(null);
   const [undo, setUndo] = useState<{ before: string; after: string } | null>(null);
   const run = useRef<string | null>(null);
+  const acceptPartials = useRef(false);
   const latest = useRef(props); latest.current = props;
   const settings = useStore((s) => s.settings);
   const setView = useStore((s) => s.setView);
   const busy = phase !== "idle";
 
   const cancel = () => {
-    const id = run.current; run.current = null;
+    const id = run.current; run.current = null; acceptPartials.current = false;
     if (id) void api.voiceStop(id, true).catch(() => {});
     setPhase("idle"); setResult(null); setLevel(0); setWarning("");
   };
@@ -44,7 +45,7 @@ export function VoiceInput(props: Props) {
   async function start() {
     if (props.disabled || run.current) return;
     setError(""); setWarning(""); setNeedsModel(false); setResult(null); setUndo(null); setPhase("preparing");
-    const id = crypto.randomUUID(); run.current = id;
+    const id = crypto.randomUUID(); run.current = id; acceptPartials.current = true;
     const current = latest.current;
     const snapshot = { base: current.draft, start: current.input.current?.selectionStart ?? current.draft.length, end: current.input.current?.selectionEnd ?? current.draft.length };
     const cleanup = !!settings?.voiceCleanupModel && (!props.localOnly || settings.voiceCleanupProvider === "local");
@@ -57,15 +58,20 @@ export function VoiceInput(props: Props) {
       setPhase("preparing");
       await api.voiceStart(id, (event: VoiceEvent) => {
         if (run.current !== id) return;
-        if (event.type === "recording") { setPhase("recording"); setSeconds(event.seconds); setLevel(event.level); }
-        else if (event.type === "preparing" || event.type === "transcribing") setPhase(event.type);
-        else if (event.type === "cancelled") { run.current = null; setPhase("idle"); }
-        else if (event.type === "warning") setWarning(t(event.message));
-        else if (event.type === "error") { run.current = null; setPhase("idle"); setError(event.message); }
+        if (event.type === "recording") { if (acceptPartials.current) { setPhase("recording"); setSeconds(event.seconds); setLevel(event.level); } }
+        else if (event.type === "partial") {
+          if (acceptPartials.current) setResult({ raw: event.text, text: event.text, edited: false, final: false, snapshot });
+        }
+        else if (event.type === "preparing") setPhase(event.type);
+        else if (event.type === "transcribing") { acceptPartials.current = false; setPhase(event.type); }
+        else if (event.type === "cancelled") { run.current = null; acceptPartials.current = false; setPhase("idle"); setResult(null); }
+        else if (event.type === "warning") setWarning((previous) => previous.includes(t(event.message)) ? previous : [previous, t(event.message)].filter(Boolean).join("\n"));
+        else if (event.type === "error") { run.current = null; acceptPartials.current = false; setPhase("idle"); setResult(null); setError(event.message); }
         else if (event.type === "done") {
+          acceptPartials.current = false;
           setLevel(0);
-          if (!event.text.trim()) { run.current = null; setPhase("idle"); setError(t("No speech was recognized. Try again closer to the microphone.")); return; }
-          setResult({ raw: event.text, text: event.text, edited: false, snapshot });
+          if (!event.text.trim()) { run.current = null; setPhase("idle"); setResult(null); setError(t("No speech was recognized. Try again closer to the microphone.")); return; }
+          setResult({ raw: event.text, text: event.text, edited: false, final: true, snapshot });
           if (!cleanup) { run.current = null; setPhase("idle"); return; }
           setPhase("cleaning");
           void api.voiceCleanup(event.text, !!props.localOnly).then((text) => {
@@ -79,6 +85,7 @@ export function VoiceInput(props: Props) {
   }
   async function stop() {
     const id = run.current; if (!id) return;
+    acceptPartials.current = false;
     setPhase("transcribing");
     try { await api.voiceStop(id); } catch (e) { cancel(); setError(voiceError(e)); }
   }
@@ -112,14 +119,15 @@ export function VoiceInput(props: Props) {
     {warning && <p className="small" role="alert">{warning}</p>}
     {result && <div className="voice-review">
       <label className="small">{t("Review dictation before inserting")}
-        <textarea className="textarea" rows={3} value={result.text} onChange={(e) => setResult({ ...result, text: e.target.value, edited: true })} />
+        <textarea className="textarea" rows={3} readOnly={!result.final} value={result.text} onChange={(e) => { if (result.final) setResult({ ...result, text: e.target.value, edited: true }); }} />
       </label>
+      {!result.final && <p className="small muted" role="status">{t("Provisional transcription · updates about every 2 seconds. Stop recording to review and edit.")}</p>}
       <div className="row wrap">
-        <button type="button" className="button small" disabled={!result.text.trim()} onClick={() => {
+        <button type="button" className="button small" disabled={!result.final || !result.text.trim()} onClick={() => {
           const before = latest.current.draft; const after = insertDictation(before, result.snapshot, result.text);
           run.current = null; setPhase("idle"); props.onChange(after); setUndo({ before, after }); setResult(null); setWarning(""); props.input.current?.focus();
         }}>{t("Insert dictation")}</button>
-        <button type="button" className="button small" onClick={() => setResult({ ...result, text: result.raw, edited: true })}>{t("Use original")}</button>
+        <button type="button" className="button small" disabled={!result.final} onClick={() => setResult({ ...result, text: result.raw, edited: true })}>{t("Use original")}</button>
         <button type="button" className="button small" onClick={cancel}>{t("Discard")}</button>
       </div>
     </div>}

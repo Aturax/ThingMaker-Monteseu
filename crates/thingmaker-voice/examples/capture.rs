@@ -2,7 +2,7 @@
 use std::{
     path::Path,
     sync::{Arc, mpsc},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use thingmaker_voice::{Event, Service};
 fn main() {
@@ -29,6 +29,8 @@ fn main() {
                 }),
             )
             .unwrap();
+        let mut recording_started = None;
+        let mut partials = 0;
         loop {
             match rx
                 .recv_timeout(Duration::from_secs(30))
@@ -36,7 +38,24 @@ fn main() {
             {
                 Event::Recording {
                     seconds: elapsed, ..
-                } if elapsed >= seconds => service.stop(&id, mixed && cycle % 3 == 2),
+                } => {
+                    if recording_started.is_none() {
+                        recording_started = Some(Instant::now());
+                        println!("cycle={} recording_started", cycle + 1);
+                    }
+                    if elapsed >= seconds {
+                        service.stop(&id, mixed && cycle % 3 == 2);
+                    }
+                }
+                Event::Partial { text } => {
+                    partials += 1;
+                    println!(
+                        "cycle={} partial_at_ms={} characters={}",
+                        cycle + 1,
+                        recording_started.unwrap().elapsed().as_millis(),
+                        text.len()
+                    );
+                }
                 Event::Done { text } => {
                     if let Some(expected) = args.get(5) {
                         let matched = normalize(&text).contains(&normalize(expected));
@@ -45,7 +64,7 @@ fn main() {
                             failures += 1;
                         }
                     }
-                    println!("cycle={} ok", cycle + 1);
+                    println!("cycle={} ok partials={partials}", cycle + 1);
                     break;
                 }
                 Event::Error { message } => {

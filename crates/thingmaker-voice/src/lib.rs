@@ -1,5 +1,6 @@
 //! The microphone and model stay native. No audio is sent to a provider or written to disk.
-//! One bounded recording at a time; stopping releases capture before inference.
+//! One bounded recording at a time; provisional inference runs away from capture.
+mod live;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -31,6 +32,7 @@ const FILES: [&str; 4] = [
 pub enum Event {
     Preparing,
     Recording { seconds: f32, level: f32 },
+    Partial { text: String },
     Transcribing,
     Done { text: String },
     Cancelled,
@@ -414,11 +416,10 @@ fn drain_audio(rx: &mut rtrb::Consumer<f32>, audio: &mut Vec<f32>, max: usize) -
 fn capture(
     folder: &Path,
     device: Option<String>,
-    control: &Control,
+    control: &Arc<Control>,
     emit: &Emit,
 ) -> Result<String, String> {
     emit(Event::Preparing);
-    let model = recognizer(folder)?;
     if control.cancel.load(Ordering::Acquire) || control.stop.load(Ordering::Acquire) {
         return Ok(String::new());
     }
@@ -446,6 +447,10 @@ fn capture(
     let max = rate as usize * MAX_SECONDS as usize;
     let mut audio = vec![0.; max];
     audio.clear();
+    let worker = live::Worker::new(folder, rate, control.clone())?;
+    if control.cancel.load(Ordering::Acquire) || control.stop.load(Ordering::Acquire) {
+        return Ok(String::new());
+    }
     let health = Arc::new(CaptureHealth::default());
     let stream = match supported.sample_format() {
         cpal::SampleFormat::F32 => {
@@ -466,6 +471,9 @@ fn capture(
     let started = Instant::now();
     let mut last = Instant::now();
     let mut warned = false;
+    let mut preview_failed = false;
+    let interval = rate as usize * live::PREVIEW_SECONDS;
+    let mut next_preview = interval;
     emit(Event::Recording {
         seconds: 0.,
         level: 0.,
@@ -479,6 +487,22 @@ fn capture(
         }
         warn_if_interrupted(&health, &mut warned, emit);
         let level = drain_audio(&mut rx, &mut audio, max);
+        while let Ok(result) = worker.results.try_recv() {
+            if control.stop.load(Ordering::Acquire) || control.cancel.load(Ordering::Acquire) {
+                break;
+            }
+            match result.text {
+                Ok(text) => emit(Event::Partial { text }),
+                Err(_) if !preview_failed => {
+                    preview_failed = true;
+                    emit(Event::Warning { message: "Live preview is unavailable. Stop recording for the final transcription.".into() });
+                }
+                Err(_) => {}
+            }
+        }
+        if audio.len() >= next_preview && worker.preview(&audio, rate) {
+            next_preview = audio.len() + interval;
+        }
         if last.elapsed() >= Duration::from_millis(100) {
             emit(Event::Recording {
                 seconds: started.elapsed().as_secs_f32(),
@@ -507,8 +531,9 @@ fn capture(
     if control.cancel.load(Ordering::Acquire) {
         return Ok(String::new());
     }
+    control.stop.store(true, Ordering::Release);
     emit(Event::Transcribing);
-    transcribe(&model, rate, &audio)
+    worker.finish(audio)
 }
 fn append_bounded(audio: &mut Vec<f32>, chunk: &[f32], max: usize) {
     let count = chunk.len().min(max.saturating_sub(audio.len()));

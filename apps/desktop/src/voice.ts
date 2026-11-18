@@ -2,7 +2,7 @@
 export type VoiceEvent =
   | { type: "preparing" | "transcribing" | "cancelled" }
   | { type: "recording"; seconds: number; level: number }
-  | { type: "done"; text: string }
+  | { type: "done" | "partial"; text: string }
   | { type: "error" | "warning"; message: string };
 export type VoiceDownload = { received: number; total: number; phase: "downloading" | "verifying" | "ready" };
 export type VoiceSnapshot = { base: string; start: number; end: number };

@@ -26,7 +26,7 @@ export function VoiceSettings({ settings, update, modelChoices }: { settings: No
   if (settings.voiceInputDevice && !inputs.some((d) => d.value === settings.voiceInputDevice)) inputs.push({ value: settings.voiceInputDevice, label: t("Saved microphone (not connected)") });
   return <SettingGroup>
     <SettingRow name={t("Voice dictation")} hint={t("Parakeet v3 · CPU · Spanish and English detected automatically")}
-      info={t("Audio stays on this computer. Stop recording to transcribe, review the text, then insert it. Maximum 2 minutes. Ctrl/Cmd+Shift+D starts or stops; Esc cancels.")}>
+      info={t("Audio stays on this computer. Provisional text updates about every 2 seconds. Stop for a final transcription, then review and insert. Maximum 2 minutes. Ctrl/Cmd+Shift+D starts or stops; Esc cancels.")}>
       {ready ? <span className="small">{t("Voice model ready")}</span> : <button type="button" className="button small" disabled={busy} onClick={() => void download()}>{t("Download voice model (465 MiB)")}</button>}
       {busy && <><span className="small" role="status">{progress?.phase === "verifying" ? t("Verifying voice model…") : t("Downloading voice model: {percent}%", { percent: Math.floor(100 * (progress?.received ?? 0) / (progress?.total || 1)) })}</span><button type="button" className="button small" onClick={() => void cancel()}>{t("Cancel")}</button></>}
       {error && <span className="small" role="alert">{error}</span>}
