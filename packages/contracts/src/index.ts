@@ -1908,6 +1908,7 @@ export const COMMANDS = {
   replySuggest: "reply_suggest",
   voiceStatus: "voice_status",
   voicePermission: "voice_permission",
+  voiceRemove: "voice_remove",
   voiceDownload: "voice_download",
   voiceCancelDownload: "voice_cancel_download",
   voiceDevices: "voice_devices",

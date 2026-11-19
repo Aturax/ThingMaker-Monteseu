@@ -1,3 +1,5 @@
+import { t } from "./i18n";
+
 /** A dictation owns a snapshot, never the live draft. Insertion is always explicit. */
 export type VoiceEvent =
   | { type: "preparing" | "transcribing" | "cancelled" }
@@ -17,5 +19,6 @@ export function insertDictation(current: string, snapshot: VoiceSnapshot, text: 
 }
 
 export function voiceError(error: unknown): string {
-  return typeof error === "object" && error && "message" in error ? String(error.message) : String(error);
+  const message = typeof error === "object" && error && "message" in error ? String(error.message) : String(error);
+  return t(message);
 }

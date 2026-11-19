@@ -4,11 +4,11 @@ Voice dictation is optional and local: NVIDIA Parakeet TDT 0.6B v3 int8 runs on 
 
 ## Try it
 
-1. Open **Settings → Chat → Voice dictation** and download the model (465 MiB download, about 640 MB installed). The download is optional, cancellable and SHA-256 verified before installation.
+1. Open **Settings → Chat → Voice dictation** and download the model (465 MiB download, about 640 MB installed). The download requires 1.2 GB of free space and is cancellable and SHA-256 verified before installation. Use **Remove voice model** here to reclaim its installed space.
 2. Choose your microphone or leave the system default.
    **Refresh microphones** reloads connected inputs without restarting the app. Device-enumeration errors are shown instead of silently hiding the inputs.
 3. Optionally select **Dictation cleanup**. This is a separate provider/model choice from **Reply suggestions**, using the provider's current ThingMaker account. Off is the default. Cloud cleanup sends the transcript, never the audio. Local sessions do not use cloud cleanup.
-4. In a session or the new-session composer, press **Dictate** or **Ctrl/Cmd+Shift+D**. Wait for **Recording**, speak, and press again to stop. **Esc** cancels. A recording stops at two minutes. Leaving the window or composer cancels capture.
+4. In a session or the new-session composer, press **Dictate** or **Ctrl/Cmd+Shift+D**. Wait for **Recording**, speak, and press again to stop. **Esc** cancels. A recording stops at two minutes. Switching windows while the microphone is open cancels capture. After you stop, transcription and cleanup continue when you switch windows. Leaving the composer discards the take.
    On macOS, the app explicitly requests microphone consent before opening CoreAudio. If the permission dialog cancels dictation by taking focus, return to the app and press **Dictate** again. Denied access gives directions to System Settings. Granting permission after cancellation never starts a recording in the background.
 5. After about two seconds of recording, provisional text starts appearing in the review box and refreshes approximately every two seconds. It is read-only while recording and during the final pass. Stop recording to obtain the final transcription, review/edit it and press **Insert dictation**. **Use original** restores the raw transcript if cleanup changed it. The usual Send/Queue/Steer action remains a separate explicit action.
 
@@ -36,7 +36,7 @@ The input device's actual rate is preserved during capture. sherpa resamples it 
 - Archive: `sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2`, 487,211,443 bytes. SHA-256: `1495e91b59d7fc53ddca91f3431758ec99f8fa253fdb0e1e851be0f72b14b0f9`.
 - Runtime: [sherpa-onnx 2.0.1](https://github.com/k2-fsa/sherpa-onnx/tree/v2.0.1), Apache-2.0, using ONNX Runtime (MIT). Native capture: CPAL 0.18.2 (Apache-2.0). Their original licenses apply to the bundled dependencies; they do not change the repository's MIT license.
 
-Cargo uses sherpa's pinned prebuilt static runtime archives for each target. Building therefore needs network access on the first native dependency build (or `SHERPA_ONNX_ARCHIVE_DIR` pointing to matching predownloaded archives). macOS retains universal build targets; microphone purpose text and audio-input entitlement are included. Mac permission/device checks and their limits are recorded in the validation reports.
+Release builds download and verify sherpa’s target-specific static archives against the SHA-256 values in `scripts/fetch-sherpa.py` before invoking Cargo. Building therefore needs network access on the first native dependency build (or `SHERPA_ONNX_ARCHIVE_DIR` pointing to matching predownloaded archives). macOS retains universal build targets; microphone purpose text and audio-input entitlement are included. Linux source builds require ALSA development headers (`libasound2-dev` on Debian and Ubuntu). After an ad-hoc-signed macOS update, you may need to grant microphone access again. Mac permission/device checks and their limits are recorded in the validation reports.
 
 ## Validation of this branch
 
@@ -46,6 +46,6 @@ Cargo uses sherpa's pinned prebuilt static runtime archives for each target. Bui
 - The real model download, checksum, extraction and readiness path passed into an isolated scratch data directory.
 - An existing contract test listing only three providers was updated to include the already-supported local provider.
 
-See the [macOS validation report](research/voice-validation-mac-2026-11-17.md) for the checks performed on Apple Silicon and the remaining interactive/Intel checks. Tests do not establish real microphone quality. The static upstream Windows runtime emits an MSVC LIBCMT conflict warning with the current Rust toolchain; native inference and host tests run successfully despite it. Revisit runtime CRT alignment before a public release.
+See the [macOS validation report](research/voice-validation-mac-2026-11-17.md) for the checks performed on Apple Silicon and the remaining interactive/Intel checks. Tests do not establish real microphone quality. Windows release builds target `x86_64-pc-windows-msvc` explicitly with `STATIC_VCRUNTIME=false` (disables Tauri’s dynamic UCRT override) and `CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS=-Ctarget-feature=+crt-static` so Rust and sherpa's static-MT runtime use the same C runtime. Apply these settings to manual Windows builds as well. Release CI records the size of each NSIS installer and universal macOS DMG in its build summary.
 
 Live-preview implementation and Mac cadence checks: [2026-11-17 validation](research/voice-live-mac-2026-11-17.md).

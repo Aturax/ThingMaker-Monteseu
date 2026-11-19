@@ -404,6 +404,7 @@ pub fn run() {
             commands::suggestions::reply_suggest,
             commands::voice::voice_status,
             commands::voice::voice_permission,
+            commands::voice::voice_remove,
             commands::voice::voice_download,
             commands::voice::voice_cancel_download,
             commands::voice::voice_devices,

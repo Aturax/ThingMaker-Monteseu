@@ -90,17 +90,39 @@ impl Service {
         self.downloading.store(false, Ordering::Release);
         result
     }
+    pub fn remove(&self) -> Result<(), String> {
+        let active = self.active.lock().map_err(err)?;
+        if active.is_some() {
+            return Err("Finish dictating before removing the voice model.".into());
+        }
+        if self.downloading.swap(true, Ordering::AcqRel) {
+            return Err("A voice model download is already running.".into());
+        }
+        let result = match fs::remove_dir_all(&self.folder) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            other => other.map_err(err),
+        };
+        self.downloading.store(false, Ordering::Release);
+        result
+    }
     fn install_inner(&self, progress: impl Fn(DownloadProgress)) -> Result<(), String> {
         if self.ready() {
             return Ok(());
         }
         let parent = self.folder.parent().ok_or("Invalid model folder")?;
         fs::create_dir_all(parent).map_err(err)?;
+        if self.folder.exists() {
+            fs::remove_dir_all(&self.folder).map_err(err)?;
+        }
+        if fs2::available_space(parent).map_err(err)? < 1_200_000_000 {
+            return Err("Free at least 1.2 GB before downloading the voice model.".into());
+        }
         let stage = tempfile::tempdir_in(parent).map_err(err)?;
         let mut archive_file = tempfile::tempfile_in(parent).map_err(err)?;
         let client = reqwest::blocking::Client::builder()
             .connect_timeout(Duration::from_secs(20))
-            .timeout(Duration::from_secs(1800))
+            // The blocking client applies this timeout to each response.read().
+            .timeout(Duration::from_secs(60))
             .build()
             .map_err(err)?;
         let mut response = client
@@ -181,13 +203,6 @@ impl Service {
             return Err("Voice model download is incomplete.".into());
         }
         fs::write(stage.path().join("verified.sha256"), ARCHIVE_SHA).map_err(err)?;
-        // A failed earlier installation never becomes visible as ready.
-        if self.folder.exists() {
-            return Err(
-                "An incomplete voice model folder exists. Remove it before downloading again."
-                    .into(),
-            );
-        }
         fs::rename(stage.path(), &self.folder).map_err(err)?;
         progress(DownloadProgress {
             received,
@@ -197,9 +212,6 @@ impl Service {
         Ok(())
     }
     pub fn start(&self, id: String, device: Option<String>, emit: Emit) -> Result<(), String> {
-        if !self.ready() {
-            return Err("Download the voice model in Settings first.".into());
-        }
         if id.is_empty() || id.len() > 100 {
             return Err("Invalid dictation id.".into());
         }
@@ -210,6 +222,9 @@ impl Service {
         });
         {
             let mut slot = self.active.lock().map_err(err)?;
+            if !self.ready() {
+                return Err("Download the voice model in Settings first.".into());
+            }
             if slot.is_some() {
                 return Err("Another dictation is already running.".into());
             }
@@ -254,6 +269,7 @@ impl Service {
     pub fn cancel_capture(&self) {
         if let Ok(slot) = self.active.lock()
             && let Some(c) = slot.as_ref()
+            && !c.stop.load(Ordering::Acquire)
         {
             c.cancel.store(true, Ordering::Release);
             c.stop.store(true, Ordering::Release);
@@ -281,7 +297,8 @@ pub fn recognizer(folder: &Path) -> Result<OfflineRecognizer, String> {
     config.model_config.tokens = Some(folder.join(FILES[3]).to_string_lossy().into_owned());
     config.model_config.model_type = Some("nemo_transducer".into());
     config.model_config.provider = Some("cpu".into());
-    config.model_config.num_threads = 4;
+    config.model_config.num_threads =
+        (std::thread::available_parallelism().map_or(2, |n| n.get()) / 2).clamp(1, 4) as i32;
     OfflineRecognizer::create(&config).ok_or_else(|| "Could not load the voice model.".into())
 }
 pub fn transcribe(
@@ -322,6 +339,7 @@ struct CaptureHealth {
     frames: AtomicUsize,
     max_callback_us: AtomicUsize,
     host_overruns: AtomicUsize,
+    device_changed: AtomicBool,
 }
 impl CaptureHealth {
     fn fail(&self, code: usize) {
@@ -350,7 +368,8 @@ fn report_stream_error(health: &CaptureHealth, kind: cpal::ErrorKind) {
         cpal::ErrorKind::Xrun => {
             health.host_overruns.fetch_add(1, Ordering::Relaxed);
         }
-        cpal::ErrorKind::DeviceChanged | cpal::ErrorKind::RealtimeDenied => {}
+        cpal::ErrorKind::DeviceChanged => health.device_changed.store(true, Ordering::Release),
+        cpal::ErrorKind::RealtimeDenied => {}
         cpal::ErrorKind::DeviceNotAvailable => health.fail(3),
         cpal::ErrorKind::PermissionDenied => health.fail(4),
         _ => health.fail(5),
@@ -358,6 +377,12 @@ fn report_stream_error(health: &CaptureHealth, kind: cpal::ErrorKind) {
 }
 
 fn warn_if_interrupted(health: &CaptureHealth, warned: &mut bool, emit: &Emit) {
+    if health.device_changed.swap(false, Ordering::AcqRel) {
+        emit(Event::Warning {
+            message: "The input device changed during recording. Review the dictation carefully."
+                .into(),
+        });
+    }
     if !*warned && health.host_overruns.load(Ordering::Relaxed) > 0 {
         *warned = true;
         emit(Event::Warning {
@@ -512,6 +537,7 @@ fn capture(
         }
         std::thread::sleep(Duration::from_millis(10));
     }
+    control.stop.store(true, Ordering::Release);
     drop(stream);
     drain_audio(&mut rx, &mut audio, max);
     warn_if_interrupted(&health, &mut warned, emit);
@@ -531,7 +557,10 @@ fn capture(
     if control.cancel.load(Ordering::Acquire) {
         return Ok(String::new());
     }
-    control.stop.store(true, Ordering::Release);
+    #[cfg(windows)]
+    if !audio.is_empty() && audio.iter().all(|&sample| sample == 0.0) {
+        return Err("The microphone returned silent audio. Check the input device and microphone access in Windows Privacy settings.".into());
+    }
     emit(Event::Transcribing);
     worker.finish(audio)
 }
@@ -681,6 +710,24 @@ mod tests {
         assert!(!model_ready(dir.path()));
     }
     #[test]
+    fn remove_only_clears_the_model_and_can_be_retried() {
+        let dir = tempfile::tempdir().unwrap();
+        let service = Service::new(dir.path());
+        fs::create_dir_all(&service.folder).unwrap();
+        fs::write(service.folder.join("tokens.txt"), "partial").unwrap();
+        let sibling = service.folder.parent().unwrap().join("settings");
+        fs::write(&sibling, "keep").unwrap();
+        service.downloading.store(true, Ordering::Release);
+        assert!(service.remove().is_err());
+        assert!(service.folder.exists());
+        service.downloading.store(false, Ordering::Release);
+        service.remove().unwrap();
+        service.remove().unwrap();
+        assert!(!service.folder.exists());
+        assert!(sibling.is_file());
+    }
+
+    #[test]
     fn stale_stop_cannot_cancel_another_recording() {
         let dir = tempfile::tempdir().unwrap();
         let service = Service::new(dir.path());
@@ -692,6 +739,9 @@ mod tests {
         *service.active.lock().unwrap() = Some(c.clone());
         service.stop("old", true);
         assert!(!c.stop.load(Ordering::Acquire));
+        service.stop("new", false);
+        service.cancel_capture();
+        assert!(!c.cancel.load(Ordering::Acquire));
         service.stop("new", true);
         assert!(c.cancel.load(Ordering::Acquire));
     }

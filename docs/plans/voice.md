@@ -58,7 +58,7 @@ ThreadRealtimeTranscriptDoneNotification
 
 Los contratos realtime están marcados experimentales. `clientManagedHandoffs` permite que el cliente controle las transferencias al agente; **no demuestra por sí solo que la sesión sea un transcriptor puro sin acciones**. Tampoco un schema demuestra disponibilidad del backend, cuota, soporte del modelo o permiso de la cuenta.
 
-No se grabó audio, instalaron modelos, midieron latencias ni probaron permisos. No hay resultados de calidad propios. No se verificó una instalación de Ollama utilizable en esta sesión. Los números del brief y de `D:/tts-stt` son referencias documentales, no benchmarks de esta propuesta.
+No se grabó audio, instalaron modelos, midieron latencias ni probaron permisos. No hay resultados de calidad propios. No se verificó una instalación de Ollama utilizable en esta sesión.
 
 ## 3. Audio a un modelo usando la suscripción
 
@@ -116,7 +116,7 @@ Para Parakeet, preferir sherpa a ONNX Runtime directo: evita escribir extractor,
 
 ### Las dos interpretaciones de «Whisper con Ollama»
 
-1. **Whisper transcribe y Ollama limpia texto.** Viable arquitectónicamente con piezas existentes. Añade una segunda inferencia. `D:/tts-stt/docs/ARCHITECTURE.md` describe 3–7 s en caliente y más de 70 s en frío para su configuración histórica de limpieza; no extrapolarlo a otro modelo/equipo. Probar un modelo pequeño multilingüe instalado, sin razonamiento, con límite de salida; no asumir que hace falta uno de 7B.
+1. **Whisper transcribe y Ollama limpia texto.** Viable arquitectónicamente con piezas existentes. Añade una segunda inferencia. Probar un modelo pequeño multilingüe instalado, sin razonamiento, con límite de salida; no asumir que hace falta uno de 7B.
 2. **Ollama recibe directamente audio.** Su documentación actual incluye `/v1/audio/transcriptions` y eventos de salida; procesa archivos por tramos [S11]. Por tanto sería incorrecto afirmar que Ollama solo maneja texto. Eso no acredita un modelo Whisper concreto, la versión mínima instalada o streaming de entrada de micrófono. Verificar versión publicada, modelo exacto, licencia, capacidad de audio, español y ejecución sin nube. No recomendar un modelo comunitario solo por llamarse `whisper`.
 
 Las páginas actuales de Gemma 3n describen capacidades de audio del modelo, pero eso por sí solo tampoco acredita la ruta de audio de cada tag de Ollama [S12]. La prueba debe demostrar audio → texto, no limitarse a que `ollama pull` tenga éxito.
@@ -130,10 +130,6 @@ Con SFSpeechRecognizer, exigir `supportsOnDeviceRecognition` y `requiresOnDevice
 En Windows, la API clásica documenta que el dictado necesita reconocimiento online habilitado [S16]. No confundir gramáticas de comandos locales, Voice Access, Win+H y una API embebible. La nueva Windows AI Speech Recognition documenta CPU/NPU, Windows 11 24H2+, SDK experimental y requisitos de empaquetado, y avisa que no es apta para producción [S17]. No rediseñar la distribución NSIS alrededor de ella para este MVP. Calidad/latencia en español de ambas vías quedan por medir.
 
 Web Speech: Safari tiene reconocimiento basado en Siri [S18], pero eso no prueba idéntico soporte en WKWebView. WebView2 tiene reportes de fallos por versión/servicio [S19]. No afirmar «no existe»: afirmar que no hemos establecido un contrato portable, offline y fiable para ambos webviews. `getUserMedia` para capturar audio es una cuestión separada de Web Speech para reconocerlo.
-
-### Servidor de voz opcional
-
-`D:/tts-stt/docs/AGENT_API.md` verifica WAV mono 16 kHz para POST, y PCM16LE por WebSocket con `partial`, `final` y `done`. Puede servir de referencia de calidad personal, pero no es requisito del producto. Su limpieza predeterminada puede usar una API externa; habría que solicitar `cleanup:false` para una comparación de STT justa. URL/token configurables introducirían otra política de credenciales y privacidad que habría que documentar frente a ADR-009. Fuera de la primera entrega salvo decisión posterior.
 
 ## 5. Diseño común de la experiencia
 
@@ -274,5 +270,3 @@ Consultadas el 2026-11-16. Las URLs vivas y versiones experimentales pueden camb
 - S20: [CPAL](https://docs.rs/cpal/latest/cpal/). La documentación consultada muestra 0.18.2; verificar MSRV y fijar versión al implementar.
 - S21: [Apple: autorización de captura](https://developer.apple.com/documentation/bundleresources/requesting-authorization-for-media-capture-on-macos).
 - S22: [Tauri: binarios auxiliares](https://v2.tauri.app/develop/sidecar/).
-
-Referencia local adicional leída: `D:/tts-stt/README.md`, `docs/ARCHITECTURE.md`, `docs/AGENT_API.md` y `android/app/src/main/java/com/jacksparrot/dictate/LocalStt.kt`. No se modificó ese proyecto ni se llamó a su servidor.

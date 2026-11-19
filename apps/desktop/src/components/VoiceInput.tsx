@@ -31,7 +31,7 @@ export function VoiceInput(props: Props) {
     setPhase("idle"); setResult(null); setLevel(0); setWarning("");
   };
   useEffect(() => {
-    const stop = () => { if (run.current) cancel(); };
+    const stop = () => { if (run.current && acceptPartials.current) cancel(); };
     const hidden = () => { if (document.hidden) stop(); };
     window.addEventListener("blur", stop);
     document.addEventListener("visibilitychange", hidden);
@@ -48,7 +48,7 @@ export function VoiceInput(props: Props) {
     const id = crypto.randomUUID(); run.current = id; acceptPartials.current = true;
     const current = latest.current;
     const snapshot = { base: current.draft, start: current.input.current?.selectionStart ?? current.draft.length, end: current.input.current?.selectionEnd ?? current.draft.length };
-    const cleanup = !!settings?.voiceCleanupModel && (!props.localOnly || settings.voiceCleanupProvider === "local");
+    const cleanup = !!settings?.voiceCleanupModel && !!settings.voiceCleanupProvider && (!props.localOnly || settings.voiceCleanupProvider === "local");
     try {
       if (!await api.voiceStatus()) { if (run.current === id) { run.current = null; setNeedsModel(true); setPhase("idle"); } return; }
       if (run.current !== id) return;
@@ -66,7 +66,7 @@ export function VoiceInput(props: Props) {
         else if (event.type === "transcribing") { acceptPartials.current = false; setPhase(event.type); }
         else if (event.type === "cancelled") { run.current = null; acceptPartials.current = false; setPhase("idle"); setResult(null); }
         else if (event.type === "warning") setWarning((previous) => previous.includes(t(event.message)) ? previous : [previous, t(event.message)].filter(Boolean).join("\n"));
-        else if (event.type === "error") { run.current = null; acceptPartials.current = false; setPhase("idle"); setResult(null); setError(event.message); }
+        else if (event.type === "error") { run.current = null; acceptPartials.current = false; setPhase("idle"); setResult(null); setError(voiceError(event.message)); }
         else if (event.type === "done") {
           acceptPartials.current = false;
           setLevel(0);
@@ -92,9 +92,9 @@ export function VoiceInput(props: Props) {
   useEffect(() => {
     if (IS_REMOTE) return;
     const key = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.repeat || props.disabled) return;
+      if (event.defaultPrevented || event.repeat) return;
       if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "d") {
-        event.preventDefault(); if (phase === "recording") void stop(); else if (!busy) void start();
+        event.preventDefault(); if (phase === "recording") void stop(); else if (!busy && !props.disabled) void start();
       } else if (event.key === "Escape" && busy) { event.preventDefault(); cancel(); }
     };
     window.addEventListener("keydown", key); return () => window.removeEventListener("keydown", key);
@@ -103,7 +103,7 @@ export function VoiceInput(props: Props) {
   if (IS_REMOTE) return null;
   return <div className="voice-input" aria-label={t("Voice dictation")}>
     <div className="row wrap">
-      <button type="button" className={`button small ${phase === "recording" ? "voice-recording" : ""}`} disabled={props.disabled || (busy && phase !== "recording")}
+      <button type="button" className={`button small ${phase === "recording" ? "voice-recording" : ""}`} disabled={phase !== "recording" && (props.disabled || busy)}
         onClick={() => { if (phase === "recording") void stop(); else void start(); }} title={t("Dictate with Ctrl/Cmd+Shift+D")}>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/></svg>
         {phase === "recording" ? t("Stop dictation") : t("Dictate")}

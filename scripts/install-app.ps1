@@ -9,9 +9,12 @@ $installDir = [IO.Path]::GetFullPath($installDir)
 . (Join-Path $PSScriptRoot 'windows-build-env.ps1')
 Push-Location $root
 try {
-    & pnpm.cmd --filter '@thingmaker/desktop' exec tauri build --config src-tauri/tauri.windows.conf.json --bundles nsis
+    # Match sherpa-onnx's static-MT runtime. An explicit target keeps host proc macros dynamic.
+    $env:STATIC_VCRUNTIME = 'false'
+    $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS = '-Ctarget-feature=+crt-static'
+    & pnpm.cmd --filter '@thingmaker/desktop' exec tauri build --target x86_64-pc-windows-msvc --config src-tauri/tauri.windows.conf.json --bundles nsis
     if ($LASTEXITCODE -ne 0) { throw 'ThingMaker build failed.' }
-    $installer = Get-ChildItem -LiteralPath (Join-Path $root 'target\release\bundle\nsis') -Filter '*-setup.exe' |
+    $installer = Get-ChildItem -LiteralPath (Join-Path $root 'target\x86_64-pc-windows-msvc\release\bundle\nsis') -Filter '*-setup.exe' |
         Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if (!$installer) { throw 'The build did not produce a Windows installer.' }
     $running = Get-Process -Name 'thingmaker-desktop' -ErrorAction SilentlyContinue

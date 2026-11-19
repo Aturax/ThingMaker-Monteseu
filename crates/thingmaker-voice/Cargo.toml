@@ -8,6 +8,7 @@ rust-version.workspace = true
 
 [dependencies]
 cpal = "=0.18.2"
+fs2 = "=0.4.3"
 rtrb = "=0.4.1"
 sherpa-onnx = "=2.0.1"
 serde = { workspace = true }

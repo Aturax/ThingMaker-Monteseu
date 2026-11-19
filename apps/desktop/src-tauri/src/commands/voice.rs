@@ -86,6 +86,18 @@ pub async fn voice_download(
     .map_err(DesktopError::io)
 }
 #[tauri::command]
+pub async fn voice_remove(
+    window: WebviewWindow,
+    service: State<'_, Arc<Service>>,
+) -> CommandResult<()> {
+    main_window(&window)?;
+    let service = service.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || service.remove())
+        .await
+        .map_err(|e| DesktopError::io(e.to_string()))?
+        .map_err(DesktopError::io)
+}
+#[tauri::command]
 pub fn voice_cancel_download(
     window: WebviewWindow,
     service: State<'_, Arc<Service>>,
@@ -175,7 +187,9 @@ pub async fn voice_cleanup(
     let Some(model) = settings.voice_cleanup_model.filter(|s| !s.is_empty()) else {
         return Ok(text);
     };
-    let provider = settings.voice_cleanup_provider.unwrap_or(Provider::Claude);
+    let Some(provider) = settings.voice_cleanup_provider else {
+        return Ok(text);
+    };
     if local_only && provider != Provider::Local {
         return Ok(text);
     }

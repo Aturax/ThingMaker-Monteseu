@@ -55,7 +55,7 @@ fn reply_with_limit(stdout: &[u8], limit: usize) -> CommandResult<String> {
         .get("reply")
         .and_then(Value::as_str)
         .ok_or_else(|| DesktopError::io("invalid suggestion text"))?;
-    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let text = if limit == 240 { text.split_whitespace().collect::<Vec<_>>().join(" ") } else { text.trim().to_string() };
     if text.chars().count() > limit {
         return Ok(String::new());
     }
@@ -288,7 +288,7 @@ mod tests {
     use super::*;
     #[test]
     fn dictation_preserves_long_text_without_relaxing_suggestion_limit() {
-        let text = "Do not change the selected files. ".repeat(30);
+        let text = "Do not change the selected files.\n  Keep the formatting.\n".repeat(30);
         let response = json!({"result":json!({"reply":text}).to_string()}).to_string();
         assert_eq!(reply_with_limit(response.as_bytes(), 16_000).unwrap(), text.trim());
         assert_eq!(reply(response.as_bytes()).unwrap(), "");

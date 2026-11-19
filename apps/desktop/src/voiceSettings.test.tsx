@@ -48,3 +48,11 @@ it("shows input enumeration errors and refreshes newly connected microphones", a
   expect(screen.getByRole("option", { name: "MacBook Pro Microphone" })).toBeTruthy();
   expect(screen.queryByRole("alert")).toBeNull();
 });
+it("can remove the installed voice model and offer a fresh download", async () => {
+  vi.mocked(api.voiceStatus).mockResolvedValue(true);
+  vi.spyOn(api, "voiceRemove").mockResolvedValue();
+  render(view());
+  fireEvent.click(await screen.findByRole("button", { name: "Remove voice model" }));
+  await screen.findByRole("button", { name: "Download voice model (465 MiB)" });
+  expect(api.voiceRemove).toHaveBeenCalledOnce();
+});

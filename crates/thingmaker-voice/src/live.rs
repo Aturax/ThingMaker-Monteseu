@@ -321,14 +321,13 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "opt-in local model benchmark; set THINGMAKER_VOICE_MODEL"]
+    #[ignore = "opt-in local model benchmark; set THINGMAKER_VOICE_MODEL and THINGMAKER_VOICE_WAV"]
     fn synthetic_two_minute_recording_has_bounded_previews_and_an_independent_final() {
         let folder = std::path::PathBuf::from(
             std::env::var("THINGMAKER_VOICE_MODEL").expect("model directory"),
         );
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../docs/research/voice-benchmark-2026-11-16/reproduction/es_correction.wav");
-        let wav = sherpa_onnx::Wave::read(path.to_str().unwrap()).unwrap();
+        let path = std::env::var("THINGMAKER_VOICE_WAV").expect("short WAV containing speech");
+        let wav = sherpa_onnx::Wave::read(&path).unwrap();
         let rate = wav.sample_rate() as u32;
         let samples: Vec<_> = wav
             .samples()

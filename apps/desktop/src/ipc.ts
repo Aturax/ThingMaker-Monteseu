@@ -185,6 +185,7 @@ export const api = {
     const channel = new Channel<import("./voice").VoiceDownload>(); channel.onmessage = onProgress;
     return call<void>(COMMANDS.voiceDownload, { channel });
   },
+  voiceRemove: () => call<void>(COMMANDS.voiceRemove),
   voiceCancelDownload: () => call<void>(COMMANDS.voiceCancelDownload),
   voiceDevices: () => call<{ id: string; name: string }[]>(COMMANDS.voiceDevices),
   voiceStart: (id: string, onEvent: (event: import("./voice").VoiceEvent) => void) => {

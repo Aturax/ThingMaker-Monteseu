@@ -56,7 +56,7 @@ jobs:
             args: --target universal-apple-darwin --config src-tauri/tauri.release.conf.json
           - platform: windows-latest
             rust_targets: ""
-            args: --config src-tauri/tauri.release.conf.json
+            args: --target x86_64-pc-windows-msvc --config src-tauri/tauri.release.conf.json
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
@@ -74,7 +74,23 @@ jobs:
 
       - uses: swatinem/rust-cache@v2
         with:
-          workspaces: ". -> target"
+          # sherpa-onnx-sys prefers files from target/ over its archive directory.
+          prefix-key: verified-native-v1
+          cache-targets: false
+
+      - name: Verify native voice runtimes
+        shell: pwsh
+        run: |
+          $archives = Join-Path $env:RUNNER_TEMP "verified-sherpa"
+          python scripts/fetch-sherpa.py $archives
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "SHERPA_ONNX_ARCHIVE_DIR=$archives" >> $env:GITHUB_ENV
+          if (Test-Path target) { throw "Expected a fresh Cargo target directory" }
+          if ($IsWindows) {
+            # Tauri's default linker override forces the dynamic UCRT. Cargo sets the full CRT below.
+            "STATIC_VCRUNTIME=false" >> $env:GITHUB_ENV
+            "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS=-Ctarget-feature=+crt-static" >> $env:GITHUB_ENV
+          }
 
       - run: pnpm install --frozen-lockfile
 
@@ -88,3 +104,13 @@ jobs:
           releaseId: ${{ needs.create-release.outputs.release_id }}
           releaseBody: ${{ needs.create-release.outputs.notes }}
           args: ${{ matrix.args }}
+
+      - name: Report installer size
+        shell: pwsh
+        run: |
+          $pattern = if ($IsWindows) { "*-setup.exe" } else { "*.dmg" }
+          $installers = @(Get-ChildItem target -Recurse -File -Filter $pattern | Where-Object { $_.Directory.Name -in "nsis","dmg" })
+          if (!$installers) { throw "Installer missing from bundle output" }
+          foreach ($installer in $installers) {
+            "- $($installer.Name) — $($installer.Length) bytes" >> $env:GITHUB_STEP_SUMMARY
+          }

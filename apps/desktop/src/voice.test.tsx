@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { useRef, useState } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { VoiceInput } from "./components/VoiceInput";
+import { useLanguageForTests } from "./i18n";
 import { api } from "./ipc";
 import { useStore } from "./store";
 import { insertDictation, type VoiceEvent } from "./voice";
@@ -15,10 +16,10 @@ beforeEach(() => {
   vi.spyOn(api, "voiceStop").mockResolvedValue();
   useStore.setState({ settings: {} as NotificationSettings });
 });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
-function Composer({ localOnly = false }: { localOnly?: boolean }) {
+afterEach(() => { cleanup(); useLanguageForTests("en"); vi.restoreAllMocks(); });
+function Composer({ localOnly = false, disabled = false }: { localOnly?: boolean; disabled?: boolean }) {
   const [text, setText] = useState("existing draft"); const input = useRef<HTMLTextAreaElement>(null);
-  return <><textarea aria-label="Composer" ref={input} value={text} onChange={(e) => setText(e.target.value)} /><VoiceInput target="session" draft={text} input={input} onChange={setText} localOnly={localOnly} /></>;
+  return <><textarea aria-label="Composer" ref={input} value={text} onChange={(e) => setText(e.target.value)} /><VoiceInput target="session" draft={text} input={input} onChange={setText} localOnly={localOnly} disabled={disabled} /></>;
 }
 async function start() { fireEvent.click(screen.getByRole("button", { name: "Dictate" })); await waitFor(() => expect(api.voiceStart).toHaveBeenCalled()); }
 it("inserts only after review and never overwrites edits made while recording", async () => {
@@ -78,6 +79,27 @@ it("never cleans a local session through a cloud provider", async () => {
   render(<Composer localOnly />); await start(); act(() => emit({ type: "done", text: "private text" }));
   expect(clean).not.toHaveBeenCalled();
 });
+it("allows stopping when the composer detaches mid-recording", async () => {
+  const view = render(<Composer />); await start();
+  view.rerender(<Composer disabled />);
+  fireEvent.click(screen.getByRole("button", { name: "Stop dictation" }));
+  expect(api.voiceStop).toHaveBeenCalledWith(expect.any(String));
+  act(() => emit({ type: "done", text: "retained" }));
+  expect(screen.getByDisplayValue("retained")).toBeTruthy();
+});
+it("keeps the original when settings have a model without a cleanup provider", async () => {
+  const clean = vi.spyOn(api, "voiceCleanup");
+  useStore.setState({ settings: { voiceCleanupModel: "orphan" } as NotificationSettings });
+  render(<Composer />); await start(); act(() => emit({ type: "done", text: "raw" }));
+  expect(clean).not.toHaveBeenCalled();
+  expect(screen.getByDisplayValue("raw")).toBeTruthy();
+});
+it("translates native dictation errors when the UI is Spanish", async () => {
+  render(<Composer />); await start();
+  useLanguageForTests("es");
+  act(() => emit({ type: "error", message: "The microphone was disconnected. Reconnect it and record again." }));
+  expect(screen.getByRole("alert").textContent).toContain("El micrófono se ha desconectado");
+});
 it("cancels native capture when its composer unmounts", async () => {
   const view = render(<Composer />); await start(); view.unmount();
   expect(api.voiceStop).toHaveBeenCalledWith(expect.any(String), true);
@@ -117,6 +139,19 @@ it("cancels on loss of focus and ignores later native events", async () => {
   act(() => emit({ type: "done", text: "stale result" }));
   expect(screen.queryByText("Review dictation before inserting")).toBeNull();
   expect(api.voiceStop).toHaveBeenCalledWith(expect.any(String), true);
+});
+it("preserves a stopped take across blur during transcription and cleanup", async () => {
+  let finish!: (text: string) => void;
+  vi.spyOn(api, "voiceCleanup").mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+  useStore.setState({ settings: { voiceCleanupModel: "chosen", voiceCleanupProvider: "codex" } as NotificationSettings });
+  render(<Composer />); await start();
+  fireEvent.click(screen.getByRole("button", { name: "Stop dictation" }));
+  fireEvent(window, new Event("blur"));
+  act(() => emit({ type: "done", text: "raw" }));
+  fireEvent(window, new Event("blur"));
+  await act(async () => finish("cleaned"));
+  expect(screen.getByDisplayValue("cleaned")).toBeTruthy();
+  expect(api.voiceStop).toHaveBeenCalledTimes(1);
 });
 it("honours the captured selection only while the draft is unchanged", () => {
   expect(insertDictation("hello world", { base: "hello world", start: 6, end: 11 }, "friend")).toBe("hello friend");

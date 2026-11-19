@@ -45,7 +45,7 @@ No hay transcripción humana revisada ni muestra equivalente sin ventilador. Por
 
 ## Diagnóstico controlado de Whisper VAD
 
-Se cargaron los mismos pesos locales de large-v3 con CTranslate2, misma precisión configurada, idioma español, beam size y `condition_on_previous_text=false`. Se cambió únicamente `vad_filter` entre dos transcripciones; no se modificó `D:/tts-stt` ni su servicio.
+Se cargaron los mismos pesos locales de large-v3 con CTranslate2, misma precisión configurada, idioma español, beam size y `condition_on_previous_text=false`. Se cambió únicamente `vad_filter` entre dos transcripciones.
 
 - `vad_filter=true`, pausa mínima 300 ms: reproduce la omisión inicial; `duration_after_vad` = 24,000 s.
 - `vad_filter=false`: vuelve a aparecer la frase inicial, con audio de 44,976 s. Sigue sin recuperar el final incompleto.
@@ -59,3 +59,9 @@ En este caso real, Parakeet sigue siendo una opción atractiva para CPU: conserv
 Whisper large-v3 no queda descartado: el diagnóstico demuestra que su configuración de detección de voz requiere ajuste. No elegirlo por su latencia de 0,79 s sin contabilizar la omisión. Mantener la limpieza opcional y reversible.
 
 Siguiente validación: referencia humana del clip, una toma completa sin corte y más ejemplos con nombres/rutas/negaciones, además del Mac. La comparación con suscripción sigue pendiente por los bloqueos previamente documentados. No se han publicado ni añadido a Git la voz del usuario o sus transcripciones completas.
+
+## Revalidación del PR en Windows, 19 de noviembre de 2026
+
+El ejemplo Rust `transcribe` compilado en modo release para `x86_64-pc-windows-msvc` procesó el mismo WAV humano de 44,976 s, con el modelo instalado y verificado. Produjo 383 caracteres que coinciden exactamente con las tres salidas previas de Parakeet. Se comprobó la inferencia con audio real guardado. La captura interactiva con micrófono y la revisión del texto en la aplicación quedan fuera de esta prueba.
+
+El instalador local NSIS de Windows x64 ocupa 18.404.508 bytes (17,55 MiB), SHA-256 `d7a93f131c9474c64b664ec95948654b1b29a6b0e76531687c1471c56f1cddf1`. La compilación optimizada terminó correctamente. `dumpbin /dependents` verificó que el ejecutable de escritorio y el ejemplo de transcripción carecen de importaciones directas de la CRT dinámica. La CI de release mide por separado el DMG universal cuando se ejecuta en macOS.

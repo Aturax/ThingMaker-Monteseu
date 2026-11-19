@@ -1,9 +1,0 @@
-{
-  "load_seconds": 0.6124831999768503,
-  "version": "v1.9.2",
-  "model": "small multilingual f16",
-  "threads": 4,
-  "gpu": false,
-  "beam_size": 1,
-  "best_of": 1
-}
