@@ -81,6 +81,8 @@ jobs:
       - name: Verify native voice runtimes
         shell: pwsh
         run: |
+          python -B scripts/test-fetch-sherpa.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $archives = Join-Path $env:RUNNER_TEMP "verified-sherpa"
           python scripts/fetch-sherpa.py $archives
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

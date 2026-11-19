@@ -27,7 +27,7 @@ export function StartingPanel() {
   const provider = PROVIDER_LABELS[starting.provider];
   const heading = starting.resuming ? starting.title || t("Conversation") : t("New session");
   const queue = () => {
-    if (starting.draft.trim()) setStartingDraft(starting.draft, true);
+    if (!starting.dictating && starting.draft.trim()) setStartingDraft(starting.draft, true);
   };
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
@@ -48,7 +48,7 @@ export function StartingPanel() {
           <div aria-hidden="true" className={`starting-mark${starting.error ? " starting-mark-error" : ""}`}>
             <ProviderMark provider={starting.provider} size={32} />
           </div>
-          {starting.error ? <p className="chip-warn-text">{starting.resuming
+          {starting.readyHandle ? <strong>{t("Review your dictation to continue to the session.")}</strong> : starting.error ? <p className="chip-warn-text">{starting.resuming
             ? t("{provider} could not resume this conversation: {error}", { provider, error: starting.error })
             : t("{provider} could not start: {error}", { provider, error: starting.error })}</p> : <>
             <strong>{starting.resuming ? t("Recovering the conversation…") : t("Setting up the office…")}</strong>
@@ -76,7 +76,7 @@ export function StartingPanel() {
             value={starting.queued ? "" : starting.draft}
           />
         </div>
-        <VoiceInput key={starting.workspaceId} target={starting.workspaceId} draft={starting.draft} input={input} localOnly={starting.provider === "local"} disabled={starting.queued} onChange={(text) => setStartingDraft(text, false)} />
+        <VoiceInput key={starting.id} target={starting.id} onPendingChange={(pending) => useStore.getState().setStartingDictation(starting.id, pending)} draft={starting.draft} input={input} localOnly={starting.provider === "local"} disabled={starting.queued} onChange={(text) => setStartingDraft(text, false)} />
       </footer>
     </section>
   );

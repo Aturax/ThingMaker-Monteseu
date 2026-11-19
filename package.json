@@ -14,7 +14,7 @@
     "typecheck": "pnpm -r --if-present run typecheck",
     "test": "pnpm -r --if-present run test",
     "build": "pnpm -r --if-present run build",
-    "dev": "pnpm --filter @thingmaker/desktop run tauri dev --config src-tauri/tauri.dev.conf.json",
+    "dev": "node scripts/local-tauri.mjs dev",
     "rust:test": "cargo test --workspace --exclude thingmaker-desktop",
     "rust:clippy": "cargo clippy --workspace --all-targets -- -D warnings",
     "app": "node scripts/install-app.mjs",

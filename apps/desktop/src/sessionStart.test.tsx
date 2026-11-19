@@ -2,7 +2,7 @@
  * A new session opens its chat at once: the person can write while the
  * agent starts, and what they send goes out as soon as it is ready.
  */
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const calls = vi.hoisted(() => ({ api: {} as Record<string, ReturnType<typeof vi.fn>> }));
@@ -11,6 +11,7 @@ vi.mock("./ipc", () => ({
 }));
 import { api } from "./ipc";
 import { useStore } from "./store";
+import type { VoiceEvent } from "./voice";
 import { StartingPanel } from "./components/StartingPanel";
 import { Sidebar } from "./components/Sidebar";
 
@@ -60,6 +61,37 @@ describe("a new session", () => {
     expect(useStore.getState().drafts.s1).toBe("Fix the login bug");
     expect(useStore.getState().starting).toBeNull();
     expect(useStore.getState().view).toEqual({ kind: "session", sessionId: "s1" });
+  });
+
+  it.each(["recording", "review"])("preserves %s dictation when the session attaches", async (stage) => {
+    let ready!: (value: unknown) => void;
+    let emit!: (event: VoiceEvent) => void;
+    vi.mocked(api.sessionOpen).mockReturnValue(new Promise((resolve) => { ready = resolve; }) as never);
+    vi.mocked(api.sessionSnapshot).mockResolvedValue({ handle: { id: "s1", attachmentGeneration: "1" }, provider: "claude", toolCalls: {}, foreground: "idle" } as never);
+    vi.mocked(api.sessionHistory).mockResolvedValue([] as never);
+    vi.mocked(api.voiceStatus).mockResolvedValue(true);
+    vi.mocked(api.voiceStart).mockImplementation(async (_, callback) => {
+      emit = callback;
+      emit({ type: "recording", seconds: 0, level: 0 });
+    });
+    const opening = useStore.getState().openSession("w1", { mode: "new" }, "claude");
+    render(<StartingPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "Dictate" }));
+    await screen.findByRole("button", { name: "Stop dictation" });
+    const done = () => emit({ type: "done", text: "my draft" });
+    if (stage === "review") act(done);
+    await act(async () => { ready({ handle: { id: "s1", attachmentGeneration: "1" } }); await opening; });
+    expect(useStore.getState().view.kind).toBe("starting");
+    expect(api.voiceStop).not.toHaveBeenCalled();
+    if (stage === "recording") {
+      fireEvent.click(screen.getByRole("button", { name: "Stop dictation" }));
+      act(done);
+    }
+    fireEvent.change(screen.getByRole("textbox", { name: "Review dictation before inserting" }), { target: { value: "reviewed" } });
+    fireEvent.click(screen.getByRole("button", { name: "Insert dictation" }));
+    expect(useStore.getState().view).toEqual({ kind: "session", sessionId: "s1" });
+    expect(useStore.getState().drafts.s1).toBe("reviewed");
+    expect(api.sessionSubmit).not.toHaveBeenCalled();
   });
 
   it("opens from the project + immediately and keeps feedback until history is ready", async () => {

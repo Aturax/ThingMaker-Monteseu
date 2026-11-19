@@ -174,7 +174,7 @@ button in the top bar says a new version is ready, and installing it restarts th
 
 #### Windows
 
-Install Node.js 24, pnpm 10+, Rust stable, and Visual Studio with **Desktop
+Install Node.js 24, pnpm 10+, Python 3.9+, Rust stable, and Visual Studio with **Desktop
 development with C++** plus a Windows 10/11 SDK. WebView2 Runtime is required
 and the installer can install it when missing.
 
@@ -185,7 +185,7 @@ pnpm app
 
 This builds an x64 NSIS installer and installs ThingMaker for the current
 user. Open **ThingMaker** from the Start menu. Quit it from the tray menu
-before rebuilding or updating. The installer is under `target/release/bundle/nsis`.
+before rebuilding or updating. The installer is under `target/x86_64-pc-windows-msvc/release/bundle/nsis`.
 Set `THINGMAKER_INSTALL_DIR` to an absolute path before running `pnpm app` to
 choose another installation directory; later builds remember that path.
 
@@ -196,18 +196,16 @@ app's versioned install folder or on PATH, and Claude's adapter in the
 Windows npm global prefix. Sign in through the Providers panel if a provider
 has no active login.
 
-For development, load the compiler environment and use the Windows window
-configuration:
+For development, the launcher loads the compiler environment and verifies the native voice libraries:
 
 ```powershell
-. ./scripts/windows-build-env.ps1
-pnpm --filter @thingmaker/desktop exec tauri dev --config src-tauri/tauri.dev.conf.json --config src-tauri/tauri.windows.conf.json
+pnpm dev
 ```
 
 #### macOS
 
 You need Rust (stable), Node 24 (via [nvm](https://github.com/nvm-sh/nvm)),
-pnpm 10 and Xcode's command line tools.
+pnpm 10, Python 3.9+ and Xcode's command line tools.
 
 ```bash
 git clone https://github.com/Monteseu/ThingMaker.git && cd ThingMaker

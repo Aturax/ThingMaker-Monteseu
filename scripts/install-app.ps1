@@ -6,13 +6,9 @@ if (!$installDir -and (Test-Path -LiteralPath $installRecord)) { $installDir = (
 if (!$installDir) { $installDir = Join-Path $env:LOCALAPPDATA 'ThingMaker' }
 if (![IO.Path]::IsPathRooted($installDir)) { throw 'THINGMAKER_INSTALL_DIR must be an absolute path.' }
 $installDir = [IO.Path]::GetFullPath($installDir)
-. (Join-Path $PSScriptRoot 'windows-build-env.ps1')
 Push-Location $root
 try {
-    # Match sherpa-onnx's static-MT runtime. An explicit target keeps host proc macros dynamic.
-    $env:STATIC_VCRUNTIME = 'false'
-    $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS = '-Ctarget-feature=+crt-static'
-    & pnpm.cmd --filter '@thingmaker/desktop' exec tauri build --target x86_64-pc-windows-msvc --config src-tauri/tauri.windows.conf.json --bundles nsis
+    & node ./scripts/local-tauri.mjs build
     if ($LASTEXITCODE -ne 0) { throw 'ThingMaker build failed.' }
     $installer = Get-ChildItem -LiteralPath (Join-Path $root 'target\x86_64-pc-windows-msvc\release\bundle\nsis') -Filter '*-setup.exe' |
         Sort-Object LastWriteTime -Descending | Select-Object -First 1

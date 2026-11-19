@@ -2,13 +2,15 @@
  * A project's home: one box starts a session with what was typed, a team
  * can be chosen first, and the recent sessions open from their row.
  */
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const calls = vi.hoisted(() => ({ api: {} as Record<string, ReturnType<typeof vi.fn>> }));
 vi.mock("./ipc", () => ({
   api: new Proxy(calls.api, { get: (target, key: string) => (target[key] ??= vi.fn(async () => undefined)) }),
 }));
+import { api } from "./ipc";
+import type { VoiceEvent } from "./voice";
 import { useStore } from "./store";
 import { WorkspaceView, homePath } from "./components/WorkspaceView";
 
@@ -81,6 +83,27 @@ describe("a project's home", () => {
     fireEvent.click(screen.getByRole("menuitemradio", { name: "Big Brain" }));
     fireEvent.click(screen.getByRole("button", { name: "Start session" }));
     expect(openSessionWithPreset).toHaveBeenCalledWith("w1", preset, undefined);
+  });
+
+  it("keeps the local team dictation private with a cloud default provider", async () => {
+    let emit!: (event: VoiceEvent) => void;
+    vi.mocked(api.voiceStatus).mockResolvedValue(true);
+    vi.mocked(api.voiceStart).mockImplementation(async (_, callback) => {
+      emit = callback;
+      emit({ type: "recording", seconds: 0, level: 0 });
+    });
+    useStore.setState({
+      providers: [{ provider: "claude", resolved: {} }, { provider: "local", resolved: {} }],
+      settings: { voiceCleanupModel: "opus", voiceCleanupProvider: "claude" },
+      teamPresets: [{ ...preset, orchestrator: { provider: "local" } }],
+    } as never);
+    render(<WorkspaceView workspaceId="w1" />);
+    fireEvent.click(screen.getByRole("button", { name: "Set team" }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Big Brain" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dictate" }));
+    await screen.findByRole("button", { name: "Stop dictation" });
+    act(() => emit({ type: "done", text: "local team text" }));
+    expect(api.voiceCleanup).not.toHaveBeenCalled();
   });
 
   it("distinguishes local chat and agent choices and starts the selected mode", () => {

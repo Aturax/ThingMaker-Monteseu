@@ -2,6 +2,7 @@ export const voice: Record<string, string> = {
   "Provisional transcription · updates about every 2 seconds. Stop recording to review and edit.": "Transcripción provisional · se actualiza aproximadamente cada 2 segundos. Termina la grabación para revisar y editar.",
   "Live preview is unavailable. Stop recording for the final transcription.": "La vista previa no está disponible. Termina la grabación para obtener la transcripción final.",
   "The microphone reported an audio interruption. Review the dictation carefully or record it again.": "El micrófono ha indicado una interrupción del audio. Revisa el dictado con atención o vuelve a grabarlo.",
+  "Review your dictation to continue to the session.": "Revisa el dictado para continuar en la sesión.",
   "Voice dictation": "Dictado por voz",
   "Remove voice model": "Eliminar modelo de voz",
   "Finish dictating before removing the voice model.": "Termina el dictado antes de eliminar el modelo de voz.",

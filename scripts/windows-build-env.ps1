@@ -1,3 +1,4 @@
+param([ValidateSet('dev', 'build')][string]$TauriAction)
 $ErrorActionPreference = 'Stop'
 $env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
@@ -9,4 +10,14 @@ $buildEnvironment = & $env:COMSPEC /d /s /c "`"$dev`" -arch=x64 -host_arch=x64 >
 if ($LASTEXITCODE -ne 0) { throw 'Could not load the Visual Studio build environment.' }
 foreach ($line in $buildEnvironment) {
     if ($line -match '^([^=]+)=(.*)$') { [Environment]::SetEnvironmentVariable($Matches[1], $Matches[2], 'Process') }
+}
+
+if ($TauriAction) {
+    # Match sherpa's static-MT archive. An explicit target leaves host proc macros dynamic.
+    $env:STATIC_VCRUNTIME = 'false'
+    $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS = '-Ctarget-feature=+crt-static'
+    $options = if ($TauriAction -eq 'dev') { @('--config', 'src-tauri/tauri.dev.conf.json') } else { @('--bundles', 'nsis') }
+    $extra = if ($env:THINGMAKER_TAURI_EXTRA_ARGS) { ConvertFrom-Json $env:THINGMAKER_TAURI_EXTRA_ARGS }
+    & node ./node_modules/@tauri-apps/cli/tauri.js $TauriAction --target x86_64-pc-windows-msvc @options --config src-tauri/tauri.windows.conf.json @extra
+    exit $LASTEXITCODE
 }

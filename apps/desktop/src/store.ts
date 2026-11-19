@@ -548,8 +548,9 @@ type State = {
    *  resumed (`resuming`, with its known title) — shown at once by
    *  StartingPanel: what the person writes meanwhile, and whether they sent
    *  it (it goes out once the session is ready). */
-  starting: { id: string; workspaceId: string; provider: Provider; draft: string; queued: boolean; error?: string; resuming?: boolean; title?: string } | null;
+  starting: { id: string; workspaceId: string; provider: Provider; draft: string; queued: boolean; dictating?: boolean; readyHandle?: string; error?: string; resuming?: boolean; title?: string } | null;
   setStartingDraft: (draft: string, queued: boolean) => void;
+  setStartingDictation: (id: string, pending: boolean) => void;
   /** Signs in to a provider: its active account, or `account`. */
   startSignIn: (provider: Provider, account?: string) => Promise<void>;
   /** Each provider's accounts (Claude Code, Codex), the default first. */
@@ -797,6 +798,23 @@ function sessionKeyForGoal(state: State, goalId: string, agentSessionId?: string
 
 type Get = () => State;
 type Set = (partial: Partial<State>) => void;
+
+/** Keep a take and its editable review mounted across automatic session attachment. */
+function settleStarting(get: Get, set: Set, id: string, handleId: string) {
+  const waited = get().starting;
+  if (waited?.id !== id) return;
+  if (waited.dictating && get().view.kind === "starting") {
+    set({ starting: { ...waited, readyHandle: handleId } });
+    return;
+  }
+  const showSession = get().view.kind === "starting";
+  set({ starting: null });
+  if (showSession) get().selectSession(handleId);
+  if (waited.draft) {
+    get().setDraft(handleId, waited.draft);
+    if (waited.queued) void get().send(handleId);
+  }
+}
 
 function projectionFromSnapshot(snapshot: Snapshot): Projection {
   const projection = emptyProjection();
@@ -2384,16 +2402,7 @@ export const useStore = create<State>((set, get) => ({
     set({ starting, view: { kind: "starting" }, error: null, lockedResume: null });
     // The chat gives way to the session once it is attached, unless the
     // person went elsewhere meanwhile; what was written carries over.
-    const settle = (handleId: string) => {
-      const waited = get().starting;
-      if (waited?.id !== starting.id) return;
-      if (get().view.kind === "starting") get().selectSession(handleId);
-      set({ starting: null });
-      if (waited.draft) {
-        get().setDraft(handleId, waited.draft);
-        if (waited.queued) void get().send(handleId);
-      }
-    };
+    const settle = (handleId: string) => settleStarting(get, set, starting.id, handleId);
     if (mode.mode === "resume") {
       try {
         const running = (await api.sessionListOpen()).find((entry) => entry.agentSessionId === mode.session_id);
@@ -3284,6 +3293,13 @@ export const useStore = create<State>((set, get) => ({
     } catch (error) {
       set({ error: asError(error), signIn: null });
     }
+  },
+
+  setStartingDictation(id, pending) {
+    const starting = get().starting;
+    if (!starting || starting.id !== id || !!starting.dictating === pending) return;
+    set({ starting: { ...starting, dictating: pending } });
+    if (!pending && starting.readyHandle) settleStarting(get, set, id, starting.readyHandle);
   },
 
   setStartingDraft(draft, queued) {

@@ -41,7 +41,7 @@ fi
 
 cd "$ROOT"
 echo "Building ThingMaker.app ($(git rev-parse --short HEAD)$(git diff --quiet HEAD -- . ':!target' 2>/dev/null || echo ', with uncommitted changes'))…"
-pnpm --filter @thingmaker/desktop exec tauri build --bundles app
+node scripts/local-tauri.mjs build
 BUILT="$ROOT/target/release/bundle/macos/ThingMaker.app"
 [ -d "$BUILT" ] || { echo "the build did not produce $BUILT" >&2; exit 1; }
 

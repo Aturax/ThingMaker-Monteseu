@@ -687,6 +687,7 @@ export function ViewsMenu({ tab, onPick, badges, hide }: { tab: SessionTab; onPi
 
 /** One session: its conversation, its views and its prompt. */
 export function SessionPanel({ sessionId }: { sessionId: string }) {
+  const pendingProvider = useStore((s) => s.pendingProvider[sessionId]?.provider);
   const session = useStore((s) => s.sessions[sessionId]);
   const draft = useStore((s) => s.drafts[sessionId] ?? "");
   const setDraft = useStore((s) => s.setDraft);
@@ -1402,7 +1403,7 @@ export function SessionPanel({ sessionId }: { sessionId: string }) {
           />
         </div>
         {suggestion && <span className="small muted" id="reply-suggestion-hint">{t("Tab to accept · Esc to dismiss")}</span>}
-        <VoiceInput key={sessionId} target={sessionId} draft={draft} input={composerRef} localOnly={session.snapshot.provider === "local"} disabled={!canSend} onChange={(text) => { dismissSuggestion(); setDraft(sessionId, text); }} />
+        <VoiceInput key={sessionId} target={sessionId} draft={draft} input={composerRef} localOnly={session.snapshot.provider === "local" || pendingProvider === "local"} disabled={!canSend} onChange={(text) => { dismissSuggestion(); setDraft(sessionId, text); }} />
         <div className="composer-row">
           <button
             aria-label={t("Attach media")}

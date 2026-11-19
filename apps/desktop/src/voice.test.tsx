@@ -4,9 +4,11 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { VoiceInput } from "./components/VoiceInput";
 import { useLanguageForTests } from "./i18n";
 import { api } from "./ipc";
-import { useStore } from "./store";
+import { EMPTY_SESSION_USAGE, useStore, type LiveSession } from "./store";
+import { emptyProjection } from "./projection";
+import { SessionPanel } from "./components/SessionPanel";
 import { insertDictation, type VoiceEvent } from "./voice";
-import type { NotificationSettings } from "@thingmaker/contracts";
+import type { NotificationSettings, Snapshot } from "@thingmaker/contracts";
 
 let emit: (e: VoiceEvent) => void;
 beforeEach(() => {
@@ -79,6 +81,35 @@ it("never cleans a local session through a cloud provider", async () => {
   render(<Composer localOnly />); await start(); act(() => emit({ type: "done", text: "private text" }));
   expect(clean).not.toHaveBeenCalled();
 });
+it.each([["claude", "local"], ["local", "claude"]] as const)("keeps dictation private across a pending %s to %s handoff", async (provider, destination) => {
+  globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} } as unknown as typeof ResizeObserver;
+  const handle = { id: "handoff", attachmentGeneration: "1" };
+  const projection = emptyProjection();
+  projection.process = "ready";
+  projection.attachment = "attached";
+  const session: LiveSession = { handle, workspaceId: "w", snapshot: { handle, provider } as Snapshot,
+    projection, inFlightRequestId: null, steerInFlight: false, attention: "none", openedAt: 0, turnStartedAt: null, lastEventAt: null, usage: EMPTY_SESSION_USAGE };
+  useStore.setState({ sessions: { handoff: session }, pendingProvider: { handoff: { provider: destination } },
+    settings: { voiceCleanupModel: "chosen", voiceCleanupProvider: "codex" } as NotificationSettings });
+  const clean = vi.spyOn(api, "voiceCleanup");
+  render(<SessionPanel sessionId="handoff" />);
+  await start();
+  act(() => emit({ type: "done", text: "private text" }));
+  expect(screen.getByDisplayValue("private text")).toBeTruthy();
+  expect(clean).not.toHaveBeenCalled();
+});
+
+it.each([[false, true], [true, false]])("keeps local privacy when the target changes (%s to %s) before cleanup", async (before, after) => {
+  const clean = vi.spyOn(api, "voiceCleanup");
+  useStore.setState({ settings: { voiceCleanupModel: "chosen", voiceCleanupProvider: "codex" } as NotificationSettings });
+  const view = render(<Composer localOnly={before} />);
+  await start();
+  view.rerender(<Composer localOnly={after} />);
+  act(() => emit({ type: "done", text: "private text" }));
+  expect(clean).not.toHaveBeenCalled();
+  expect(screen.getByDisplayValue("private text")).toBeTruthy();
+});
+
 it("allows stopping when the composer detaches mid-recording", async () => {
   const view = render(<Composer />); await start();
   view.rerender(<Composer disabled />);

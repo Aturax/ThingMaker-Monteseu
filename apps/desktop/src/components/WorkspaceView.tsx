@@ -220,7 +220,7 @@ export function StartBox({ workspaceId, name, trusted, initialPreset, onStarted 
         rows={2}
         value={text}
       />
-      <VoiceInput key={workspaceId} target={workspaceId} draft={text} input={input} localOnly={chosen === "local"} onChange={setText} disabled={!trusted} />
+      <VoiceInput key={workspaceId} target={workspaceId} draft={text} input={input} localOnly={(preset?.orchestrator.provider ?? chosen) === "local"} onChange={setText} disabled={!trusted} />
       <div className="home-start-bar">
         {preset ? (
           <span className="model-chip home-chip-static" title={t("The team decides who leads")}>

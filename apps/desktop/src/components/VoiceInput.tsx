@@ -6,7 +6,7 @@ import { IS_REMOTE } from "../remote/mode";
 import { insertDictation, voiceError, type VoiceSnapshot, type VoiceEvent } from "../voice";
 
 type Result = { raw: string; text: string; edited: boolean; final: boolean; snapshot: VoiceSnapshot };
-type Props = { target: string; draft: string; onChange: (text: string) => void; input: RefObject<HTMLTextAreaElement | null>; disabled?: boolean; localOnly?: boolean };
+type Props = { target: string; draft: string; onChange: (text: string) => void; input: RefObject<HTMLTextAreaElement | null>; disabled?: boolean; localOnly?: boolean; onPendingChange?: (pending: boolean) => void };
 
 /** Review first: a transcript or late cleanup can never send or overwrite a live draft. */
 export function VoiceInput(props: Props) {
@@ -21,14 +21,14 @@ export function VoiceInput(props: Props) {
   const run = useRef<string | null>(null);
   const acceptPartials = useRef(false);
   const latest = useRef(props); latest.current = props;
-  const settings = useStore((s) => s.settings);
   const setView = useStore((s) => s.setView);
   const busy = phase !== "idle";
+  const releaseComposer = () => latest.current.onPendingChange?.(false);
 
   const cancel = () => {
     const id = run.current; run.current = null; acceptPartials.current = false;
     if (id) void api.voiceStop(id, true).catch(() => {});
-    setPhase("idle"); setResult(null); setLevel(0); setWarning("");
+    setPhase("idle"); setResult(null); setLevel(0); setWarning(""); releaseComposer();
   };
   useEffect(() => {
     const stop = () => { if (run.current && acceptPartials.current) cancel(); };
@@ -39,18 +39,22 @@ export function VoiceInput(props: Props) {
       window.removeEventListener("blur", stop); document.removeEventListener("visibilitychange", hidden);
       const id = run.current; run.current = null;
       if (id) void api.voiceStop(id, true).catch(() => {});
+      latest.current.onPendingChange?.(false);
     };
   }, [props.target]); // The native recording must not outlive its composer.
 
   async function start() {
     if (props.disabled || run.current) return;
+    latest.current.onPendingChange?.(true);
     setError(""); setWarning(""); setNeedsModel(false); setResult(null); setUndo(null); setPhase("preparing");
     const id = crypto.randomUUID(); run.current = id; acceptPartials.current = true;
     const current = latest.current;
     const snapshot = { base: current.draft, start: current.input.current?.selectionStart ?? current.draft.length, end: current.input.current?.selectionEnd ?? current.draft.length };
-    const cleanup = !!settings?.voiceCleanupModel && !!settings.voiceCleanupProvider && (!props.localOnly || settings.voiceCleanupProvider === "local");
+    const startedLocal = current.localOnly;
+    const settings = useStore.getState().settings;
+    const cleanupProvider = settings?.voiceCleanupModel ? settings.voiceCleanupProvider : undefined;
     try {
-      if (!await api.voiceStatus()) { if (run.current === id) { run.current = null; setNeedsModel(true); setPhase("idle"); } return; }
+      if (!await api.voiceStatus()) { if (run.current === id) { run.current = null; setNeedsModel(true); setPhase("idle"); releaseComposer(); } return; }
       if (run.current !== id) return;
       setPhase("permission");
       await api.voicePermission();
@@ -64,24 +68,25 @@ export function VoiceInput(props: Props) {
         }
         else if (event.type === "preparing") setPhase(event.type);
         else if (event.type === "transcribing") { acceptPartials.current = false; setPhase(event.type); }
-        else if (event.type === "cancelled") { run.current = null; acceptPartials.current = false; setPhase("idle"); setResult(null); }
+        else if (event.type === "cancelled") { run.current = null; acceptPartials.current = false; setPhase("idle"); setResult(null); releaseComposer(); }
         else if (event.type === "warning") setWarning((previous) => previous.includes(t(event.message)) ? previous : [previous, t(event.message)].filter(Boolean).join("\n"));
-        else if (event.type === "error") { run.current = null; acceptPartials.current = false; setPhase("idle"); setResult(null); setError(voiceError(event.message)); }
+        else if (event.type === "error") { run.current = null; acceptPartials.current = false; setPhase("idle"); setResult(null); setError(voiceError(event.message)); releaseComposer(); }
         else if (event.type === "done") {
           acceptPartials.current = false;
           setLevel(0);
-          if (!event.text.trim()) { run.current = null; setPhase("idle"); setResult(null); setError(t("No speech was recognized. Try again closer to the microphone.")); return; }
+          if (!event.text.trim()) { run.current = null; setPhase("idle"); setResult(null); setError(t("No speech was recognized. Try again closer to the microphone.")); releaseComposer(); return; }
           setResult({ raw: event.text, text: event.text, edited: false, final: true, snapshot });
-          if (!cleanup) { run.current = null; setPhase("idle"); return; }
+          const localOnly = !!(startedLocal || latest.current.localOnly);
+          if (!cleanupProvider || (localOnly && cleanupProvider !== "local")) { run.current = null; setPhase("idle"); return; }
           setPhase("cleaning");
-          void api.voiceCleanup(event.text, !!props.localOnly).then((text) => {
+          void api.voiceCleanup(event.text, localOnly).then((text) => {
             if (run.current !== id) return;
             if (text.trim()) setResult((r) => r && !r.edited ? { ...r, text } : r);
           }).catch(() => { if (run.current === id) setError(t("Cleanup failed. Your original dictation is available.")); })
             .finally(() => { if (run.current === id) { run.current = null; setPhase("idle"); } });
         }
       });
-    } catch (e) { if (run.current === id) { run.current = null; setPhase("idle"); setError(voiceError(e)); } }
+    } catch (e) { if (run.current === id) { run.current = null; setPhase("idle"); setError(voiceError(e)); releaseComposer(); } }
   }
   async function stop() {
     const id = run.current; if (!id) return;
@@ -125,7 +130,7 @@ export function VoiceInput(props: Props) {
       <div className="row wrap">
         <button type="button" className="button small" disabled={!result.final || !result.text.trim()} onClick={() => {
           const before = latest.current.draft; const after = insertDictation(before, result.snapshot, result.text);
-          run.current = null; setPhase("idle"); props.onChange(after); setUndo({ before, after }); setResult(null); setWarning(""); props.input.current?.focus();
+          run.current = null; setPhase("idle"); props.onChange(after); setUndo({ before, after }); setResult(null); setWarning(""); props.input.current?.focus(); releaseComposer();
         }}>{t("Insert dictation")}</button>
         <button type="button" className="button small" disabled={!result.final} onClick={() => setResult({ ...result, text: result.raw, edited: true })}>{t("Use original")}</button>
         <button type="button" className="button small" onClick={cancel}>{t("Discard")}</button>
