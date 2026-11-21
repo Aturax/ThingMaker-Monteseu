@@ -126,7 +126,7 @@ describe("manual session order", () => {
     const { container, unmount } = render(<Sidebar />);
     expect(titles(container)).toEqual(["First topic", "Nested topic", "Second topic"]);
 
-    const firstButton = screen.getByRole("button", { name: "First topic" });
+    const firstButton = screen.getByText("First topic").closest("button")!;
     fireEvent.keyDown(firstButton, { key: "F10", shiftKey: true });
     expect(screen.getByRole<HTMLButtonElement>("menuitem", { name: "Move up" }).disabled).toBe(true);
     const moveDown = screen.getByRole("menuitem", { name: "Move down" });
@@ -135,7 +135,7 @@ describe("manual session order", () => {
     expect(document.activeElement).toBe(firstButton);
     expect(titles(container)).toEqual(["Second topic", "First topic", "Nested topic"]);
 
-    fireEvent.contextMenu(screen.getByRole("button", { name: "Nested topic" }));
+    fireEvent.contextMenu(screen.getByText("Nested topic"));
     expect(screen.queryByRole("menuitem", { name: "Move up" })).toBeNull();
     unmount();
     const added = record({ agentSessionId: "new", autoTitle: "New topic" });
