@@ -73,6 +73,7 @@ export type Row = {
   running: boolean;
   exited: boolean;
   updated: string | undefined;
+  createdAt?: number;
   trusted: boolean;
   pinned: boolean;
   archived: boolean;
@@ -93,10 +94,10 @@ function sessionOrderKey(row: Row): string | null {
   return row.id === null ? null : JSON.stringify([row.workspaceId, row.id]);
 }
 
-function orderSessionRows(rows: Row[], stored: unknown): Row[] {
+function orderSessionRows(rows: Row[], stored: unknown, newestFirst = false): Row[] {
   if (!Array.isArray(stored) || stored.length === 0) return rows;
   const positions = new Map(stored.map((key, index) => [key, index]));
-  const position = (row: Row) => positions.get(sessionOrderKey(row)) ?? stored.length;
+  const position = (row: Row) => positions.get(sessionOrderKey(row)) ?? (newestFirst ? -1 : stored.length);
   return [...rows].sort((a, b) => position(a) - position(b));
 }
 
@@ -275,7 +276,7 @@ function SessionRow({
 
 /** Right-click (or the ⋯ action) menu for one session row. */
 /** A project's right-click menu. */
-function ProjectMenu({ workspaceId, at, onClose, onWipe, onRemove, onRenameFolder }: { workspaceId: string; at: { x: number; y: number }; onClose: () => void; onWipe: () => void; onRemove: () => void; onRenameFolder: () => void }) {
+function ProjectMenu({ workspaceId, at, onClose, onWipe, onRemove, onRenameFolder, newestFirst, togglePlacement }: { workspaceId: string; at: { x: number; y: number }; onClose: () => void; onWipe: () => void; onRemove: () => void; onRenameFolder: () => void; newestFirst: boolean; togglePlacement: () => void }) {
   const root = useStore((s) => s.workspaces.find((workspace) => workspace.id === workspaceId)?.canonicalRoot);
   const setError = useStore((s) => s.setError);
   const menu = useRef<HTMLDivElement>(null);
@@ -299,7 +300,10 @@ function ProjectMenu({ workspaceId, at, onClose, onWipe, onRemove, onRenameFolde
     onClose();
   };
   return (
-    <div className="context-menu" ref={menu} role="menu" style={{ left: Math.min(at.x, window.innerWidth - 220), top: Math.min(at.y, window.innerHeight - 130) }}>
+    <div className="context-menu" ref={menu} role="menu" style={{ left: Math.min(at.x, window.innerWidth - 220), top: Math.min(at.y, window.innerHeight - 170) }}>
+      <button aria-checked={newestFirst} className="context-item" onClick={act(togglePlacement)} role="menuitemcheckbox" type="button">
+        {newestFirst && "✓ "}{t("New sessions at the top")}
+      </button>
       {root && (
         <button className="context-item" onClick={act(() => void api.revealInFinder(root).catch(setError))} role="menuitem" type="button">
           {t("Open folder")}
@@ -635,6 +639,9 @@ export function Sidebar() {
   const [pinnedCollapsed, setPinnedCollapsed] = useState(() => remembered("thingmaker.sidebar.pinnedCollapsed", false));
   const [menu, setMenu] = useState<SessionMenuTarget | null>(null);
   const closeSessionMenu = useCallback(() => setMenu(null), []);
+  const [newestFirstByProject, setNewestFirstByProject] = useState(() =>
+    remembered<Record<string, boolean>>("thingmaker.sidebar.newestFirst", {}),
+  );
   const [sessionOrders, setSessionOrders] = useState(() =>
     remembered<Record<string, unknown> | null>(SESSION_ORDERS_KEY, {}) ?? {},
   );
@@ -715,6 +722,7 @@ export function Sidebar() {
     const live = sessionOrder.map((id) => sessions[id]).filter((s): s is NonNullable<typeof s> => !!s && s.workspaceId === workspace.id);
     const liveIds = new Set(live.map((s) => s.handle.id));
     const workspaceRecords = records[workspace.id] ?? [];
+    const creationTimes = new Map(workspaceRecords.map((record) => [record.agentSessionId, record.createdAt]));
     const archived = new Set(workspaceRecords.filter((r) => r.archiveState === "archived").map((r) => r.agentSessionId));
     const pinned = new Set(workspaceRecords.filter((r) => r.pinned).map((r) => r.agentSessionId));
     // A rename is a desktop overlay, so it wins over the derived title.
@@ -736,6 +744,7 @@ export function Sidebar() {
       running: session.projection.foreground === "running" || session.projection.foreground === "cancelling" || session.projection.foreground === "awaiting_user",
       exited: session.projection.process === "exited",
       updated: undefined,
+      createdAt: creationTimes.get(session.snapshot.agentSessionId ?? "") ?? session.openedAt,
       trusted,
       pinned: session.snapshot.agentSessionId !== null && pinned.has(session.snapshot.agentSessionId),
       archived: false,
@@ -763,6 +772,7 @@ export function Sidebar() {
         running: false,
         exited: false,
         updated: record.lastSeen ? new Date(record.lastSeen).toISOString() : undefined,
+        createdAt: record.createdAt,
         trusted,
         pinned: pinned.has(record.agentSessionId),
         archived: archived.has(record.agentSessionId),
@@ -775,9 +785,14 @@ export function Sidebar() {
     const activeIds = new Set(active.map((row) => row.id));
     const hasParent = (row: Row) => row.parent !== null && activeIds.has(row.parent);
     const children = active.filter(hasParent);
+    const newestFirst = newestFirstByProject[workspace.id] ?? false;
+    const chronological = active.filter((row) => !hasParent(row)).sort((a, b) =>
+      ((a.createdAt ?? 0) - (b.createdAt ?? 0)) * (newestFirst ? -1 : 1),
+    );
     const rootRows = orderSessionRows(
-      active.filter((row) => !hasParent(row)),
+      chronological,
       sessionOrders[`project:${workspace.id}`],
+      newestFirst,
     );
     return {
       workspace,
@@ -1128,6 +1143,12 @@ export function Sidebar() {
       {projectMenu && (
         <ProjectMenu
           at={projectMenu.at}
+          newestFirst={newestFirstByProject[projectMenu.id] ?? false}
+          togglePlacement={() => {
+            const next = { ...newestFirstByProject, [projectMenu.id]: !newestFirstByProject[projectMenu.id] };
+            setNewestFirstByProject(next);
+            remember("thingmaker.sidebar.newestFirst", next);
+          }}
           onClose={() => setProjectMenu(null)}
           onRemove={() => setRemoving({ id: projectMenu.id, name: projectMenu.name, live: projectMenu.live })}
           onRenameFolder={() => setRenamingFolder(projectMenu.id)}

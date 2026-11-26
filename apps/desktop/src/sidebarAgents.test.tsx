@@ -29,6 +29,7 @@ import type { SessionRecord, WorkspaceRecord } from "@thingmaker/contracts";
 afterEach(() => {
   cleanup();
   localStorage.removeItem("thingmaker.sidebar.sessionOrders");
+  localStorage.removeItem("thingmaker.sidebar.newestFirst");
 });
 
 const workspace: WorkspaceRecord = {
@@ -142,6 +143,19 @@ describe("manual session order", () => {
     seed([added, first, fork, second]);
     const mounted = render(<Sidebar />);
     expect(titles(mounted.container)).toEqual(["Second topic", "First topic", "Nested topic", "New topic"]);
+  });
+
+  it("remembers which end receives new sessions in a project", () => {
+    const older = record({ agentSessionId: "older", autoTitle: "Older", createdAt: 1 });
+    const newer = record({ agentSessionId: "newer", autoTitle: "Newer", createdAt: 2 });
+    seed([newer, older]);
+    const view = render(<Sidebar />);
+    expect(titles(view.container)).toEqual(["Older", "Newer"]);
+    fireEvent.contextMenu(screen.getByText("P3"));
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "New sessions at the top" }));
+    view.unmount();
+    seed([older, newer, record({ agentSessionId: "latest", autoTitle: "Latest", createdAt: 3 })]);
+    expect(titles(render(<Sidebar />).container)).toEqual(["Latest", "Newer", "Older"]);
   });
 
   it("reorders the pinned list independently of project sessions", () => {
